@@ -32,13 +32,13 @@ export function LoginForm() {
   return (
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="username">Username</Label>
         <Input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          placeholder="you@example.com"
+          id="username"
+          name="username"
+          type="text"
+          autoComplete="username"
+          placeholder="hello"
           required
         />
       </div>
