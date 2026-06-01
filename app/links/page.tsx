@@ -3,18 +3,18 @@ import { redirect } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
-import { ContractDashboard } from "@/components/contract-dashboard";
+import { PortalsList } from "@/components/portals-list";
 import { createClient } from "@/lib/supabase/server";
-import { MIN_RELEVANCE_SCORE, type Opportunity } from "@/lib/types";
+import type { SourcingPortal } from "@/lib/types";
 
-// This page reads auth cookies and live data, so always render on request.
+// Reads auth cookies and live data, so always render on request.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Dashboard · ContractHunter",
+  title: "Helpful Links · ContractHunter",
 };
 
-export default async function DashboardPage() {
+export default async function LinksPage() {
   const supabase = await createClient();
 
   const {
@@ -25,12 +25,12 @@ export default async function DashboardPage() {
   if (!user) redirect("/login");
 
   const { data, error } = await supabase
-    .from("contract_opportunities")
+    .from("sourcing_portals")
     .select("*")
-    .gte("relevance_score", MIN_RELEVANCE_SCORE)
-    .order("relevance_score", { ascending: false });
+    .eq("is_active", true)
+    .order("name", { ascending: true });
 
-  const opportunities = (data ?? []) as Opportunity[];
+  const portals = (data ?? []) as SourcingPortal[];
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -38,11 +38,10 @@ export default async function DashboardPage() {
 
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight">
-            Contract Opportunities
-          </h1>
+          <h1 className="text-xl font-semibold tracking-tight">Helpful Links</h1>
           <p className="text-sm text-muted-foreground">
-            High-relevance opportunities (score ≥ 65), highest first.
+            Government contracting portals you can search directly — federal,
+            state, and county.
           </p>
         </div>
 
@@ -50,12 +49,12 @@ export default async function DashboardPage() {
           <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
-              <p className="font-semibold">Could not load opportunities</p>
+              <p className="font-semibold">Could not load links</p>
               <p className="mt-1 text-destructive/80">{error.message}</p>
             </div>
           </div>
         ) : (
-          <ContractDashboard opportunities={opportunities} />
+          <PortalsList portals={portals} />
         )}
       </main>
     </div>

@@ -28,3 +28,23 @@ export interface Opportunity {
 
 /** Minimum relevance score shown on the dashboard (per the product brief). */
 export const MIN_RELEVANCE_SCORE = 65;
+
+/**
+ * A government contracting portal shown on the Helpful Links page.
+ *
+ * Mirrors the `sourcing_portals` table. `search_keywords` is typed loosely
+ * because the agent may store an array or a delimited string; `toStringArray`
+ * in `lib/format.ts` normalizes it for the UI.
+ */
+export interface SourcingPortal {
+  id: string;
+  name: string;
+  state: string | null;
+  portal_type: string | null;
+  portal_url: string;
+  notes: string | null;
+  search_keywords: string[] | string | null;
+  last_checked: string | null;
+  is_active: boolean;
+  created_at: string;
+}
