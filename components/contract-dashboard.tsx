@@ -1,12 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Inbox, Search, SearchX, SlidersHorizontal } from "lucide-react";
 
 import { ContractCard } from "@/components/contract-card";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { getDeadlineInfo } from "@/lib/format";
 import { MIN_RELEVANCE_SCORE, type Opportunity } from "@/lib/types";
+
+type TabValue = "active" | "expired";
 
 export function ContractDashboard({
   opportunities,
@@ -15,14 +24,15 @@ export function ContractDashboard({
 }) {
   const [query, setQuery] = useState("");
   const [minScore, setMinScore] = useState(MIN_RELEVANCE_SCORE);
+  const [tab, setTab] = useState<TabValue>("active");
 
-  const filtered = useMemo(() => {
+  // Filter by search + minimum score, then split into active vs. expired.
+  const { active, expired } = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return opportunities.filter((opportunity) => {
+    const matches = opportunities.filter((opportunity) => {
       if (opportunity.relevance_score < minScore) return false;
       if (!q) return true;
-
       const haystack = [
         opportunity.title,
         opportunity.agency,
@@ -31,14 +41,26 @@ export function ContractDashboard({
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-
       return haystack.includes(q);
     });
+
+    const activeList: Opportunity[] = [];
+    const expiredList: Opportunity[] = [];
+    for (const opportunity of matches) {
+      // Only a deadline strictly in the past counts as expired; "due today"
+      // and opportunities with no deadline stay in Active.
+      if (getDeadlineInfo(opportunity.response_deadline).status === "expired") {
+        expiredList.push(opportunity);
+      } else {
+        activeList.push(opportunity);
+      }
+    }
+    return { active: activeList, expired: expiredList };
   }, [opportunities, query, minScore]);
 
   return (
     <div className="space-y-6">
-      {/* Controls: search + minimum relevance slider */}
+      {/* Controls: search + minimum relevance slider (apply to both tabs) */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -68,34 +90,64 @@ export function ContractDashboard({
         </div>
       </div>
 
-      {/* Result count */}
-      <p className="text-sm text-muted-foreground">
-        Showing <span className="font-medium text-foreground">{filtered.length}</span>{" "}
-        {filtered.length === 1 ? "opportunity" : "opportunities"}
-      </p>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)}>
+        <TabsList>
+          <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+          <TabsTrigger value="expired">Expired ({expired.length})</TabsTrigger>
+        </TabsList>
 
-      {/* List / empty states */}
-      {filtered.length === 0 ? (
-        opportunities.length === 0 ? (
-          <EmptyState
-            icon={<Inbox className="h-8 w-8 text-muted-foreground" />}
-            title="No opportunities yet"
-            description="High-relevance contracts will appear here as the agent discovers them."
+        <TabsContent value="active">
+          <OpportunityList
+            opportunities={active}
+            empty={
+              opportunities.length === 0 ? (
+                <EmptyState
+                  icon={<Inbox className="h-8 w-8 text-muted-foreground" />}
+                  title="No opportunities yet"
+                  description="High-relevance contracts will appear here as the agent discovers them."
+                />
+              ) : (
+                <EmptyState
+                  icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
+                  title="No active opportunities"
+                  description="Nothing matches here — check the Expired tab, or adjust your search and score filter."
+                />
+              )
+            }
           />
-        ) : (
-          <EmptyState
-            icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
-            title="No matching opportunities"
-            description="Try a different search term or lower the minimum relevance score."
+        </TabsContent>
+
+        <TabsContent value="expired">
+          <OpportunityList
+            opportunities={expired}
+            empty={
+              <EmptyState
+                icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
+                title="No expired opportunities"
+                description="Opportunities whose response deadline has passed will appear here."
+              />
+            }
           />
-        )
-      ) : (
-        <div className="grid gap-4">
-          {filtered.map((opportunity) => (
-            <ContractCard key={opportunity.id} opportunity={opportunity} />
-          ))}
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function OpportunityList({
+  opportunities,
+  empty,
+}: {
+  opportunities: Opportunity[];
+  empty: ReactNode;
+}) {
+  if (opportunities.length === 0) return <>{empty}</>;
+
+  return (
+    <div className="grid gap-4">
+      {opportunities.map((opportunity) => (
+        <ContractCard key={opportunity.id} opportunity={opportunity} />
+      ))}
     </div>
   );
 }
@@ -105,7 +157,7 @@ function EmptyState({
   title,
   description,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   description: string;
 }) {
