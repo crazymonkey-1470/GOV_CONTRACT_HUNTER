@@ -45,11 +45,14 @@ export interface DeadlineInfo {
 }
 
 /** Compute "X days left" style info for a response deadline. */
-export function getDeadlineInfo(value: string | null | undefined): DeadlineInfo {
+export function getDeadlineInfo(
+  value: string | null | undefined,
+  now: Date = new Date(),
+): DeadlineInfo {
   const date = toDate(value);
   if (!date) return { label: "No deadline", status: "none", days: null };
 
-  const days = differenceInCalendarDays(date, new Date());
+  const days = differenceInCalendarDays(date, now);
 
   if (days < 0) return { label: "Expired", status: "expired", days };
   if (days === 0) return { label: "Due today", status: "soon", days };

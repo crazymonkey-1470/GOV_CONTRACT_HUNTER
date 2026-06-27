@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Inbox, Search, SearchX, SlidersHorizontal } from "lucide-react";
 
 import { ContractCard } from "@/components/contract-card";
@@ -26,11 +26,23 @@ export function ContractDashboard({
   const [minScore, setMinScore] = useState(MIN_RELEVANCE_SCORE);
   const [tab, setTab] = useState<TabValue>("active");
 
-  // Filter by search + minimum score, then split into active vs. expired.
-  const { active, expired } = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  // Re-evaluate "expired" periodically so a long-open session reclassifies
+  // opportunities (and refreshes the tab counts) as deadlines lapse.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-    const matches = opportunities.filter((opportunity) => {
+  const { active, expired, totalActive, totalExpired } = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const reference = new Date(now);
+
+    const isExpired = (opportunity: Opportunity) =>
+      getDeadlineInfo(opportunity.response_deadline, reference).status ===
+      "expired";
+
+    const matchesFilter = (opportunity: Opportunity) => {
       if (opportunity.relevance_score < minScore) return false;
       if (!q) return true;
       const haystack = [
@@ -42,21 +54,39 @@ export function ContractDashboard({
         .join(" ")
         .toLowerCase();
       return haystack.includes(q);
-    });
+    };
 
     const activeList: Opportunity[] = [];
     const expiredList: Opportunity[] = [];
-    for (const opportunity of matches) {
-      // Only a deadline strictly in the past counts as expired; "due today"
-      // and opportunities with no deadline stay in Active.
-      if (getDeadlineInfo(opportunity.response_deadline).status === "expired") {
-        expiredList.push(opportunity);
-      } else {
-        activeList.push(opportunity);
-      }
+    let activeCount = 0;
+    let expiredCount = 0;
+
+    for (const opportunity of opportunities) {
+      // Only a deadline strictly in the past is "expired"; due-today and
+      // no-deadline opportunities stay Active.
+      const expiredItem = isExpired(opportunity);
+      if (expiredItem) expiredCount += 1;
+      else activeCount += 1;
+
+      if (!matchesFilter(opportunity)) continue;
+      (expiredItem ? expiredList : activeList).push(opportunity);
     }
-    return { active: activeList, expired: expiredList };
-  }, [opportunities, query, minScore]);
+
+    return {
+      active: activeList,
+      expired: expiredList,
+      totalActive: activeCount,
+      totalExpired: expiredCount,
+    };
+  }, [opportunities, query, minScore, now]);
+
+  const noMatch = (
+    <EmptyState
+      icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
+      title="No matching opportunities"
+      description="Try a different search term or lower the minimum relevance score."
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -106,12 +136,14 @@ export function ContractDashboard({
                   title="No opportunities yet"
                   description="High-relevance contracts will appear here as the agent discovers them."
                 />
-              ) : (
+              ) : totalActive === 0 ? (
                 <EmptyState
-                  icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
+                  icon={<Inbox className="h-8 w-8 text-muted-foreground" />}
                   title="No active opportunities"
-                  description="Nothing matches here — check the Expired tab, or adjust your search and score filter."
+                  description="Every current opportunity has expired — check the Expired tab."
                 />
+              ) : (
+                noMatch
               )
             }
           />
@@ -121,11 +153,15 @@ export function ContractDashboard({
           <OpportunityList
             opportunities={expired}
             empty={
-              <EmptyState
-                icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
-                title="No expired opportunities"
-                description="Opportunities whose response deadline has passed will appear here."
-              />
+              totalExpired === 0 ? (
+                <EmptyState
+                  icon={<SearchX className="h-8 w-8 text-muted-foreground" />}
+                  title="No expired opportunities"
+                  description="Opportunities whose response deadline has passed will appear here."
+                />
+              ) : (
+                noMatch
+              )
             }
           />
         </TabsContent>
