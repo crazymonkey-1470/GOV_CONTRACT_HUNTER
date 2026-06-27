@@ -24,6 +24,11 @@ export interface Opportunity {
   raw_data: unknown;
   status: string | null;
   created_at: string;
+  // Detail-drawer fields (added in migration 004; populated by the agent).
+  notice_type: string | null;
+  poc_name: string | null;
+  poc_email: string | null;
+  requirements: string[] | string | null;
 }
 
 /** Minimum relevance score shown on the dashboard (per the product brief). */

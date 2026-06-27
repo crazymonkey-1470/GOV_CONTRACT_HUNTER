@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { PortalsList } from "@/components/portals-list";
 import { createClient } from "@/lib/supabase/server";
 import type { SourcingPortal } from "@/lib/types";
 
-// Reads auth cookies and live data, so always render on request.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
@@ -21,7 +20,6 @@ export default async function LinksPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Defense-in-depth: middleware already guards this route.
   if (!user) redirect("/login");
 
   const { data, error } = await supabase
@@ -33,10 +31,8 @@ export default async function LinksPage() {
   const portals = (data ?? []) as SourcingPortal[];
 
   return (
-    <div className="min-h-screen bg-muted/30">
-      <AppHeader email={user.email} />
-
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+    <AppShell email={user.email}>
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight">Helpful Links</h1>
           <p className="text-sm text-muted-foreground">
@@ -56,7 +52,7 @@ export default async function LinksPage() {
         ) : (
           <PortalsList portals={portals} />
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

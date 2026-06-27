@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 
-import { AppHeader } from "@/components/app-header";
-import { ContractDashboard } from "@/components/contract-dashboard";
+import { AppShell } from "@/components/app-shell";
+import { DashboardView } from "@/components/dashboard-view";
 import { createClient } from "@/lib/supabase/server";
 import { MIN_RELEVANCE_SCORE, type Opportunity } from "@/lib/types";
 
-// This page reads auth cookies and live data, so always render on request.
+// Reads auth cookies and live data, so always render on request.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
@@ -21,7 +21,6 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Defense-in-depth: middleware already guards this route.
   if (!user) redirect("/login");
 
   const { data, error } = await supabase
@@ -33,20 +32,9 @@ export default async function DashboardPage() {
   const opportunities = (data ?? []) as Opportunity[];
 
   return (
-    <div className="min-h-screen bg-muted/30">
-      <AppHeader email={user.email} />
-
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight">
-            Contract Opportunities
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            High-relevance opportunities (score ≥ 65), highest first.
-          </p>
-        </div>
-
-        {error ? (
+    <AppShell email={user.email}>
+      {error ? (
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
           <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
@@ -54,10 +42,10 @@ export default async function DashboardPage() {
               <p className="mt-1 text-destructive/80">{error.message}</p>
             </div>
           </div>
-        ) : (
-          <ContractDashboard opportunities={opportunities} />
-        )}
-      </main>
-    </div>
+        </div>
+      ) : (
+        <DashboardView opportunities={opportunities} />
+      )}
+    </AppShell>
   );
 }
