@@ -65,6 +65,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_search_url(url: str | None) -> bool:
+    """True if a URL already looks like a keyword search (has a query string).
+
+    Used only to prioritize which portal to scrape first -- a search results
+    page yields listings, a bare landing page usually does not.
+    """
+    if not url:
+        return False
+    low = url.lower()
+    return any(marker in low for marker in ("?q=", "&q=", "search", "keyword", "?", "solicitation"))
+
+
 # ---------------------------------------------------------------------------
 # SAM pipeline
 # ---------------------------------------------------------------------------
@@ -224,8 +236,12 @@ def run_firecrawl(*, limit: int = 1) -> RunStats:
         fc.close()
         return stats
 
-    # Prefer a non-SAM portal per Step 6.
+    # Prefer a non-SAM portal per Step 6, and among those prefer a portal whose
+    # target URL is already a keyword *search* (e.g. HigherGov's ?q=LIMS) over a
+    # bare landing page -- a search page is far more likely to yield extractable
+    # LIMS listings. Ordering only; nothing is invented.
     non_sam = [p for p in portals if "sam.gov" not in (p.get("portal_url") or "").lower()]
+    non_sam.sort(key=lambda p: (0 if _is_search_url(_portal_target_url(p)) else 1, p.get("name") or ""))
     chosen = non_sam[:limit] or portals[:limit]
 
     with fc:
