@@ -137,6 +137,26 @@ class SamClient:
         raise SamApiError(f"SAM.gov request failed after retries: {last_exc}")
 
     # -- public API --------------------------------------------------------
+    @staticmethod
+    def _search_params(
+        query: str, posted_from: date, posted_to: date, limit: int, offset: int
+    ) -> dict[str, Any]:
+        """Build query params for one search page.
+
+        NOTE: the public Opportunities v2 API has NO free-text ``q`` parameter --
+        keyword search is done via ``title`` (substring match against the notice
+        title). Descriptions still get matched later by scoring.py after the
+        per-notice description fetch. postedFrom/postedTo are REQUIRED by the
+        API and must be MM/dd/yyyy.
+        """
+        return {
+            "title": query,
+            "postedFrom": posted_from.strftime("%m/%d/%Y"),
+            "postedTo": posted_to.strftime("%m/%d/%Y"),
+            "limit": limit,
+            "offset": offset,
+        }
+
     def search(
         self,
         *,
@@ -146,21 +166,18 @@ class SamClient:
         limit: int = config.SAM_PAGE_LIMIT,
         max_pages: int = 5,
     ) -> list[dict[str, Any]]:
-        """Return raw ``opportunitiesData`` dicts for one keyword query.
+        """Return raw ``opportunitiesData`` dicts for one title-keyword query.
 
-        Paginates until results are exhausted or ``max_pages`` is reached.
+        Paginates until results are exhausted or ``max_pages`` is reached; if
+        the API reports more records than we fetched, that is surfaced on
+        stdout so silent truncation can't masquerade as full coverage.
         """
         results: list[dict[str, Any]] = []
         offset = 0
+        total = 0
         for _ in range(max_pages):
-            params = {
-                "api_key": self.api_key,
-                "q": query,
-                "postedFrom": posted_from.strftime("%m/%d/%Y"),
-                "postedTo": posted_to.strftime("%m/%d/%Y"),
-                "limit": limit,
-                "offset": offset,
-            }
+            params = {"api_key": self.api_key}
+            params.update(self._search_params(query, posted_from, posted_to, limit, offset))
             resp = self._get(config.SAM_SEARCH_URL, params)
             try:
                 payload = resp.json()
@@ -178,6 +195,11 @@ class SamClient:
             offset += limit
             if offset >= total or not batch:
                 break
+        if total > len(results):
+            print(
+                f"[sam]   note: '{query}' has {total} records in window, "
+                f"fetched first {len(results)} (raise max_pages to widen)"
+            )
         return results
 
     def fetch_description(self, description_ref: str | None) -> str:

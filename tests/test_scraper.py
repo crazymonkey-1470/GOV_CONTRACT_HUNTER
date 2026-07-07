@@ -55,6 +55,36 @@ class ScoringGate(unittest.TestCase):
             scoring.score_opportunity(**kwargs).score,
         )
 
+    def test_unambiguous_lims_title_qualifies_alone(self):
+        # A notice titled with a core LIMS term must clear the gate even when
+        # the description fetch failed and NAICS doesn't match (recall fix).
+        r = scoring.score_opportunity(
+            title="Laboratory Information Management System Replacement",
+            description="",
+            naics_codes=["518210"],
+        )
+        self.assertTrue(r.is_relevant, f"scored {r.score}")
+
+    def test_specimen_courier_logistics_rejected(self):
+        # Contextual primary terms need software context: a physical courier
+        # RFP mentioning specimen tracking must not qualify (precision fix).
+        r = scoring.score_opportunity(
+            title="Specimen Tracking and Courier Services",
+            description="Contractor shall provide daily specimen pickup, transport "
+                        "to the reference laboratory, and chain of custody logs.",
+            naics_codes=["492110"],
+        )
+        self.assertFalse(r.is_relevant, f"scored {r.score}")
+
+    def test_specimen_system_with_software_context_qualifies(self):
+        r = scoring.score_opportunity(
+            title="Specimen Tracking System Modernization",
+            description="Replace the legacy specimen tracking software platform "
+                        "used by the clinical laboratory.",
+            naics_codes=["541512"],
+        )
+        self.assertTrue(r.is_relevant, f"scored {r.score}")
+
     def test_lims_word_boundary(self):
         # 'slims'/'limsomething' must not fire the 'lims' pattern.
         r = scoring.score_opportunity(
@@ -146,13 +176,102 @@ class SamNormalization(unittest.TestCase):
         self.assertEqual(_strip_html("<p>Need a <b>LIMS</b></p>"), "Need a LIMS")
 
 
+class SearchParamContract(unittest.TestCase):
+    def test_uses_title_not_q(self):
+        # The public Opportunities v2 API has no free-text `q` parameter.
+        from datetime import date
+        params = SamClient._search_params("LIMS", date(2026, 6, 1), date(2026, 7, 1), 100, 0)
+        self.assertNotIn("q", params)
+        self.assertEqual(params["title"], "LIMS")
+        self.assertEqual(params["postedFrom"], "06/01/2026")
+        self.assertEqual(params["postedTo"], "07/01/2026")
+
+
+class LookbackWidening(unittest.TestCase):
+    def test_schedule_widens_to_90(self):
+        from scraper.run import _widen_schedule
+        self.assertEqual(_widen_schedule(14), [14, 30, 60, 90])
+        self.assertEqual(_widen_schedule(45), [45, 60, 90])
+        self.assertEqual(_widen_schedule(90), [90])
+        self.assertEqual(_widen_schedule(200), [90])  # capped at MAX_LOOKBACK_DAYS
+
+
+class FirecrawlListingExtraction(unittest.TestCase):
+    MD = (
+        "# Results\n"
+        "[LIMS Replacement RFP #2431](https://portal.gov/rfp/2431)\n"
+        "[Laboratory Information Management System Upgrade](/opps/lims-upgrade)\n"
+        "[Road Paving Services](https://portal.gov/rfp/9999)\n"
+        "[Careers](https://portal.gov/careers)\n"
+        "[Slims Fitness Program](https://portal.gov/slims)\n"
+    )
+
+    def test_extracts_only_lims_links_and_resolves_relative(self):
+        from scraper.firecrawl_client import extract_listing_links
+        links = extract_listing_links(self.MD, base_url="https://portal.gov/search?q=LIMS")
+        urls = [u for _, u in links]
+        self.assertIn("https://portal.gov/rfp/2431", urls)
+        self.assertIn("https://portal.gov/opps/lims-upgrade", urls)  # relative resolved
+        self.assertNotIn("https://portal.gov/rfp/9999", urls)        # non-LIMS
+        self.assertNotIn("https://portal.gov/careers", urls)
+        self.assertNotIn("https://portal.gov/slims", urls)           # 'slims' != 'lims'
+
+    def test_empty_markdown(self):
+        from scraper.firecrawl_client import extract_listing_links
+        self.assertEqual(extract_listing_links("", base_url="https://x.gov"), [])
+
+    def test_deterministic_notice_id(self):
+        from scraper.run import _firecrawl_notice_id
+        a = _firecrawl_notice_id("https://portal.gov/rfp/2431")
+        b = _firecrawl_notice_id("https://portal.gov/rfp/2431")
+        self.assertEqual(a, b)
+        self.assertTrue(a.startswith("FC-"))
+        self.assertNotEqual(a, _firecrawl_notice_id("https://portal.gov/rfp/2432"))
+
+
+class SourceTags(unittest.TestCase):
+    def test_keyword_tags_source(self):
+        r = scoring.score_opportunity(title="LIMS", description="LIMS system", naics_codes=[])
+        self.assertIn(config.SOURCE_TAG_SAM, r.keyword_tags())
+        self.assertIn(config.SOURCE_TAG_FIRECRAWL,
+                      r.keyword_tags(source_tag=config.SOURCE_TAG_FIRECRAWL))
+
+
+class DotenvFallbackParser(unittest.TestCase):
+    def test_export_quotes_and_inline_comments(self):
+        import os, tempfile
+        from scraper.run import _load_dotenv
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, ".env"), "w") as fh:
+                fh.write(
+                    'export FOO_TEST_A=plain # trailing comment\n'
+                    'FOO_TEST_B="quoted # not a comment"\n'
+                    "FOO_TEST_C='single'\n"
+                )
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                _load_dotenv()  # python-dotenv path (if installed) or fallback
+            finally:
+                os.chdir(cwd)
+            try:
+                self.assertEqual(os.environ.get("FOO_TEST_A"), "plain")
+                self.assertEqual(os.environ.get("FOO_TEST_B"), "quoted # not a comment")
+                self.assertEqual(os.environ.get("FOO_TEST_C"), "single")
+            finally:
+                for k in ("FOO_TEST_A", "FOO_TEST_B", "FOO_TEST_C"):
+                    os.environ.pop(k, None)
+
+
 class ConfigGuards(unittest.TestCase):
-    def test_placeholder_rejected(self):
+    def test_placeholder_rejected_without_leaking_value(self):
         import os
         os.environ["_CH_TEST_KEY"] = "your-sam-api-key"
         try:
-            with self.assertRaises(config.ConfigError):
+            with self.assertRaises(config.ConfigError) as ctx:
                 config.require("_CH_TEST_KEY")
+            # The error must never echo the value (it may be a real secret).
+            self.assertNotIn("your-sam-api-key", str(ctx.exception))
         finally:
             del os.environ["_CH_TEST_KEY"]
 

@@ -24,9 +24,28 @@ tables the Next.js dashboard already uses.
 1. Every stored value comes from a real API response; missing fields stay `null`.
 2. `relevance_score` is computed only from LIMS terms actually present in the
    SAM-provided title/description (+ real NAICS). Same input → same score.
+   A core LIMS term in the title is decisive (65); "specimen/sample tracking"
+   style terms only count when the text shows software/system context, so
+   courier-logistics RFPs cannot qualify.
 3. Only opportunities scoring `>= MIN_RELEVANCE_SCORE` (65, matching the
    dashboard) are inserted.
-4. LLM enrichment (optional) may only rephrase supplied text; it adds no facts.
+4. LLM enrichment (optional) may only rephrase supplied text; it adds no facts,
+   and truncated responses are discarded rather than stored.
+
+## Pipeline behavior
+
+- **SAM**: keyword searches go through the v2 `title` parameter (the public API
+  has no free-text `q`). Dedup against the DB happens **before** the per-notice
+  description fetch, so quota is never spent re-fetching known notices. If a
+  lookback window finds nothing LIMS-relevant, it auto-widens (14 → 30 → 60 →
+  90 days) within the same run. Inserts are confirmed by re-query — the RUN
+  SUMMARY only reports IDs verified present.
+- **Firecrawl**: scrapes the portal's target page (preferring pre-built keyword
+  search URLs), extracts listing links whose real anchor text/URL carries a
+  LIMS signal, follows each one (a second real scrape), runs the full relevance
+  gate on the detail page text, and inserts qualifying listings with a
+  deterministic `FC-<hash>` notice_id (same URL → same ID → dedup works).
+  Unknown fields (dates, value, POC) stay `null` — never invented.
 
 ## Usage
 

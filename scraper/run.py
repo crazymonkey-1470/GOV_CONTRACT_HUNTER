@@ -20,7 +20,12 @@ from datetime import datetime, timezone
 
 from . import config, enrichment, scoring
 from .db import DbError, SupabaseClient
-from .firecrawl_client import FirecrawlClient, FirecrawlError, _portal_target_url
+from .firecrawl_client import (
+    FirecrawlClient,
+    FirecrawlError,
+    _portal_target_url,
+    extract_listing_links,
+)
 from .sam_api import SamApiError, SamClient, default_window
 
 
@@ -38,16 +43,26 @@ def _load_dotenv() -> None:
         return
     except ImportError:
         pass
-    # Minimal fallback parser.
+    # Minimal fallback parser (dotenv-compatible for the common cases:
+    # optional "export " prefix, quoted values, inline comments on unquoted
+    # values).
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            os.environ.setdefault(key, value)
+            value = value.strip()
+            if len(value) >= 2 and value[0] in "\"'" and value.endswith(value[0]):
+                value = value[1:-1]
+            else:
+                # Unquoted: strip an inline comment ("VALUE  # note").
+                value = value.split(" #")[0].split("\t#")[0].strip()
+            if key:
+                os.environ.setdefault(key, value)
 
 
 @dataclass
@@ -59,6 +74,9 @@ class RunStats:
     skipped_duplicate: list[str] = field(default_factory=list)
     below_threshold: int = 0
     errors: list[str] = field(default_factory=list)
+    # Non-fatal issues worth surfacing (e.g. a description fetch that failed and
+    # forced title-only scoring). Do not flip the exit code.
+    warnings: list[str] = field(default_factory=list)
 
 
 def _now_iso() -> str:
@@ -80,7 +98,42 @@ def _is_search_url(url: str | None) -> bool:
 # ---------------------------------------------------------------------------
 # SAM pipeline
 # ---------------------------------------------------------------------------
+def _widen_schedule(start_days: int) -> list[int]:
+    """Lookback windows to try, starting at the configured window.
+
+    Implements the "widen up to 90 days if the narrow window is empty" rule:
+    the relevance gate is never loosened, only the posted-date window grows.
+    """
+    start = max(1, min(start_days, config.MAX_LOOKBACK_DAYS))
+    schedule = [start]
+    for step in (30, 60, config.MAX_LOOKBACK_DAYS):
+        if step > start:
+            schedule.append(step)
+    return schedule
+
+
 def run_sam(*, dry_run: bool) -> RunStats:
+    """Run the SAM pipeline, widening the lookback window if it finds nothing.
+
+    A window is only widened when it produced zero relevant notices, zero
+    duplicates (i.e. nothing LIMS-related exists in it at all), and no errors.
+    """
+    schedule = _widen_schedule(config.lookback_days())
+    stats = RunStats()
+    for i, days in enumerate(schedule):
+        stats = _run_sam_window(dry_run=dry_run, lookback=days)
+        if i > 0:
+            stats.warnings.append(
+                f"lookback auto-widened to {days} days (narrower windows were empty)"
+            )
+        if stats.relevant or stats.skipped_duplicate or stats.errors:
+            break
+        if i + 1 < len(schedule):
+            print(f"[sam] window of {days} days found nothing LIMS-relevant; widening…")
+    return stats
+
+
+def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
     stats = RunStats()
 
     sam_key = config.require(config.ENV_SAM_API_KEY)
@@ -90,9 +143,6 @@ def run_sam(*, dry_run: bool) -> RunStats:
             config.require(config.ENV_SUPABASE_URL),
             config.require(config.ENV_SUPABASE_SERVICE_KEY),
         )
-
-    lookback = config.lookback_days()
-    lookback = min(lookback, config.MAX_LOOKBACK_DAYS)
 
     use_llm = enrichment.is_available()
     print(f"[sam] lookback window: {lookback} days   LLM enrichment: {'on' if use_llm else 'off'}")
@@ -118,14 +168,40 @@ def run_sam(*, dry_run: bool) -> RunStats:
         stats.unique = len(raw_by_id)
         print(f"[sam] {stats.fetched} records fetched, {stats.unique} unique notices")
 
-        # Score every unique notice against its real title + description.
+        # Dedup BEFORE the per-notice description fetch: notices already in the
+        # table were inserted by a previous run and need no further API calls.
+        # This both keeps SAM quota for new notices and makes the second-run
+        # dedup proof visible in the summary.
+        existing: set[str] = set()
+        if not dry_run:
+            assert supa is not None
+            try:
+                existing = supa.existing_notice_ids(list(raw_by_id))
+            except DbError as exc:
+                # Fail-safe: with an unknown existing-set we could double-insert,
+                # so treat this as fatal for the run rather than guessing.
+                stats.errors.append(f"dedup lookup failed, aborting inserts: {exc}")
+                supa.close()
+                return stats
+            stats.skipped_duplicate = sorted(existing & set(raw_by_id))
+            if stats.skipped_duplicate:
+                print(f"[sam] {len(stats.skipped_duplicate)} notices already in DB (skipped)")
+
+        # Score each NEW notice against its real title + fetched description.
         qualifying: list[dict] = []
         for nid, rec in raw_by_id.items():
+            if nid in existing:
+                continue
             try:
                 opp = sam.normalize(rec, with_description=True)
             except SamApiError as exc:
                 stats.errors.append(f"normalize {nid}: {exc}")
                 continue
+
+            if not opp.description and rec.get("description"):
+                # The notice HAS a description we could not fetch; say so --
+                # title-only scoring is stricter, never looser.
+                stats.warnings.append(f"description fetch failed for {nid}; scored title-only")
 
             result = scoring.score_opportunity(
                 title=opp.title,
@@ -148,24 +224,21 @@ def run_sam(*, dry_run: bool) -> RunStats:
         return stats
 
     assert supa is not None
-    # Dedup: which notice_ids already exist?
-    ids = [r["notice_id"] for r in qualifying]
-    try:
-        existing = supa.existing_notice_ids(ids)
-    except DbError as exc:
-        stats.errors.append(f"dedup lookup: {exc}")
-        existing = set()
-
-    to_insert = [r for r in qualifying if r["notice_id"] not in existing]
-    stats.skipped_duplicate = [r["notice_id"] for r in qualifying if r["notice_id"] in existing]
-
+    to_insert = qualifying
     if to_insert:
+        sent_ids = [r["notice_id"] for r in to_insert]
         try:
-            inserted = supa.insert_opportunities(to_insert)
-            stats.inserted = [r.get("notice_id") for r in inserted if r.get("notice_id")]
-            # If PostgREST didn't echo rows, fall back to what we sent.
-            if not stats.inserted:
-                stats.inserted = [r["notice_id"] for r in to_insert]
+            supa.insert_opportunities(to_insert)
+            # Trust, but verify: confirm the rows are actually present rather
+            # than assuming the POST landed. Only confirmed IDs are reported
+            # as inserted.
+            now_present = supa.existing_notice_ids(sent_ids)
+            stats.inserted = [nid for nid in sent_ids if nid in now_present]
+            missing = [nid for nid in sent_ids if nid not in now_present]
+            if missing:
+                stats.errors.append(
+                    f"{len(missing)} rows sent but not found after insert: {missing}"
+                )
         except DbError as exc:
             stats.errors.append(f"insert: {exc}")
     supa.close()
@@ -216,7 +289,53 @@ def _build_record(opp, result, *, use_llm: bool) -> dict:
 # ---------------------------------------------------------------------------
 # Firecrawl (non-SAM portal) pipeline
 # ---------------------------------------------------------------------------
-def run_firecrawl(*, limit: int = 1) -> RunStats:
+def _firecrawl_notice_id(url: str) -> str:
+    """Deterministic dedup key for a non-SAM listing: same URL -> same ID."""
+    import hashlib
+
+    return "FC-" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_firecrawl_record(
+    *, portal: dict, listing_title: str, listing_url: str, page_markdown: str, result
+) -> dict:
+    """Assemble a record from a real scraped detail page.
+
+    Every populated field is taken from the page or the portal row; everything
+    unknown (dates, value, POC, NAICS) stays None/empty -- never invented.
+    """
+    return {
+        "notice_id": _firecrawl_notice_id(listing_url),
+        "title": listing_title or "(untitled listing)",
+        "agency": None,
+        "value": None,
+        "posted_date": None,
+        "response_deadline": None,
+        "sam_link": listing_url,
+        "relevance_score": result.score,
+        "summary": scoring.build_summary(title=listing_title, description=page_markdown),
+        "keywords": result.keyword_tags(source_tag=config.SOURCE_TAG_FIRECRAWL),
+        "naics_codes": [],
+        "set_aside": None,
+        "customer_fit_notes": None,
+        "raw_data": {
+            "source": "Firecrawl",
+            "portal_name": portal.get("name"),
+            "portal_url": portal.get("portal_url"),
+            "listing_url": listing_url,
+            "matched_primary": result.matched_primary,
+            "matched_secondary": result.matched_secondary,
+            "markdown_excerpt": (page_markdown or "")[:5000],
+        },
+        "status": config.NEW_OPPORTUNITY_STATUS,
+        "notice_type": None,
+        "poc_name": None,
+        "poc_email": None,
+        "requirements": scoring.extract_requirements(page_markdown),
+    }
+
+
+def run_firecrawl(*, limit: int = 1, dry_run: bool = False, listings_per_portal: int = 5) -> RunStats:
     stats = RunStats()
 
     supa = SupabaseClient(
@@ -244,6 +363,7 @@ def run_firecrawl(*, limit: int = 1) -> RunStats:
     non_sam.sort(key=lambda p: (0 if _is_search_url(_portal_target_url(p)) else 1, p.get("name") or ""))
     chosen = non_sam[:limit] or portals[:limit]
 
+    qualifying: list[dict] = []
     with fc:
         for portal in chosen:
             target = _portal_target_url(portal)
@@ -255,34 +375,78 @@ def run_firecrawl(*, limit: int = 1) -> RunStats:
                 print(f"[firecrawl] ERROR: {exc}")
                 continue
 
-            try:
-                supa.touch_portal_last_checked(portal["id"], _now_iso())
-            except DbError as exc:
-                stats.errors.append(f"touch last_checked {portal.get('name')}: {exc}")
+            if not dry_run:
+                try:
+                    supa.touch_portal_last_checked(portal["id"], _now_iso())
+                except DbError as exc:
+                    stats.errors.append(f"touch last_checked {portal.get('name')}: {exc}")
 
             if scraped is None or not scraped.has_content:
-                print("[firecrawl] landing page yielded no extractable content")
-                stats.below_threshold += 1
+                print("[firecrawl] page yielded no extractable content")
                 continue
 
-            stats.fetched += 1
-            result = scoring.score_opportunity(
-                title=scraped.metadata.get("title", "") or portal.get("name", ""),
-                description=scraped.markdown,
-                naics_codes=[],
+            print(f"[firecrawl] scraped {len(scraped.markdown)} chars from {scraped.url}")
+            listings = extract_listing_links(
+                scraped.markdown, base_url=scraped.url, limit=listings_per_portal
             )
-            print(
-                f"[firecrawl] scraped {len(scraped.markdown)} chars, "
-                f"LIMS relevance score {result.score}"
-            )
-            if result.is_relevant:
-                stats.relevant += 1
-            else:
-                stats.below_threshold += 1
+            if not listings:
                 print(
-                    "[firecrawl] page has no LIMS-relevant listings extractable from "
-                    "the landing page (see summary for suggested search URLs)"
+                    "[firecrawl] no LIMS-relevant listing links extractable from this "
+                    "page -- consider adding a pre-built keyword search_url (see GO_LIVE.md)"
                 )
+                continue
+
+            # Follow each real listing link and run the full relevance gate on
+            # the detail page's actual text.
+            for anchor, url in listings:
+                try:
+                    detail = fc.scrape(url)
+                except FirecrawlError as exc:
+                    stats.warnings.append(f"listing scrape failed {url}: {exc}")
+                    continue
+                stats.fetched += 1
+                title = (detail.metadata.get("title") if isinstance(detail.metadata, dict) else "") or anchor
+                if not isinstance(title, str):
+                    title = anchor
+                result = scoring.score_opportunity(
+                    title=title, description=detail.markdown, naics_codes=[]
+                )
+                print(f"[score] {result.score:>3}  {url[:90]}")
+                if not result.is_relevant:
+                    stats.below_threshold += 1
+                    continue
+                stats.relevant += 1
+                qualifying.append(
+                    _build_firecrawl_record(
+                        portal=portal,
+                        listing_title=title,
+                        listing_url=url,
+                        page_markdown=detail.markdown,
+                        result=result,
+                    )
+                )
+
+    stats.unique = len(qualifying)
+    if dry_run:
+        print("[firecrawl] dry-run: no inserts performed")
+        supa.close()
+        return stats
+
+    if qualifying:
+        sent_ids = [r["notice_id"] for r in qualifying]
+        try:
+            already = supa.existing_notice_ids(sent_ids)
+            stats.skipped_duplicate = sorted(already)
+            to_insert = [r for r in qualifying if r["notice_id"] not in already]
+            if to_insert:
+                supa.insert_opportunities(to_insert)
+                now_present = supa.existing_notice_ids([r["notice_id"] for r in to_insert])
+                stats.inserted = [r["notice_id"] for r in to_insert if r["notice_id"] in now_present]
+                missing = [r["notice_id"] for r in to_insert if r["notice_id"] not in now_present]
+                if missing:
+                    stats.errors.append(f"rows sent but not found after insert: {missing}")
+        except DbError as exc:
+            stats.errors.append(f"insert: {exc}")
 
     supa.close()
     return stats
@@ -304,6 +468,9 @@ def print_summary(mode: str, stats: RunStats) -> None:
     print(f"  Skipped (duplicate)        : {len(stats.skipped_duplicate)}")
     for nid in stats.skipped_duplicate:
         print(f"      = {nid}  (already present)")
+    print(f"  Warnings                   : {len(stats.warnings)}")
+    for w in stats.warnings:
+        print(f"      ~ {w}")
     print(f"  Errors                     : {len(stats.errors)}")
     for err in stats.errors:
         print(f"      ! {err}")
@@ -321,8 +488,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.firecrawl:
-            stats = run_firecrawl(limit=args.portal_limit)
-            print_summary("FIRECRAWL", stats)
+            stats = run_firecrawl(limit=args.portal_limit, dry_run=args.dry_run)
+            print_summary("FIRECRAWL" + (" (dry-run)" if args.dry_run else ""), stats)
         else:
             stats = run_sam(dry_run=args.dry_run)
             print_summary("SAM.gov" + (" (dry-run)" if args.dry_run else ""), stats)

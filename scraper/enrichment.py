@@ -50,10 +50,17 @@ def customer_fit_notes(*, title: str, description: str) -> str | None:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=180,
+            max_tokens=500,
+            # Two grounded sentences need no extended thinking; disabling it
+            # also stops thinking tokens from eating the max_tokens budget.
+            thinking={"type": "disabled"},
             system=_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
+        # A response cut off by max_tokens could end mid-sentence; discard it
+        # rather than store a truncated note.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            return None
         parts = [block.text for block in resp.content if getattr(block, "type", None) == "text"]
         out = " ".join(p.strip() for p in parts).strip()
     except Exception:

@@ -1,22 +1,25 @@
 """Client for a self-hosted Firecrawl server (real HTTP scrape requests).
 
 Used for the non-SAM sourcing portals in ``sourcing_portals``. Firecrawl turns
-a portal page into markdown/text, which is then run through the same
-:mod:`scraper.scoring` gate as SAM results -- so a portal row is only inserted
-when the scraped page genuinely contains LIMS-relevant text.
+a portal page into markdown/text; listing links whose anchor text carries a
+genuine LIMS signal are followed (a second real scrape) and run through the
+same :mod:`scraper.scoring` gate as SAM results -- so a row is only inserted
+when the scraped detail page genuinely contains LIMS-relevant text.
 
 Supports the Firecrawl ``/v1/scrape`` API (self-hosted or cloud).
 """
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 
-from . import config
+from . import config, scoring
 
 
 class FirecrawlError(RuntimeError):
@@ -32,6 +35,40 @@ class ScrapeResult:
     @property
     def has_content(self) -> bool:
         return bool(self.markdown and self.markdown.strip())
+
+
+# Markdown links: [anchor text](https://target). Anchor capped to keep nav
+# noise and megabyte-long anchors out.
+_MD_LINK_RE = re.compile(r"\[([^\]\n]{4,300})\]\((https?://[^)\s]+|/[^)\s]*)\)")
+# 'lims' as a standalone token in a URL (query, path segment) -- not 'slims'.
+_URL_LIMS_RE = re.compile(r"(?<![a-z0-9])lims(?![a-z0-9])", re.IGNORECASE)
+
+
+def extract_listing_links(
+    markdown: str, *, base_url: str, limit: int = 5
+) -> list[tuple[str, str]]:
+    """Pull candidate opportunity links out of scraped page markdown.
+
+    Returns (anchor_text, absolute_url) pairs where the *real* anchor text
+    contains a primary LIMS term, or the URL itself mentions LIMS. Purely
+    mechanical extraction of what is on the page -- nothing is synthesized.
+    """
+    if not markdown:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for match in _MD_LINK_RE.finditer(markdown):
+        anchor = " ".join(match.group(1).split())
+        href = match.group(2)
+        url = urljoin(base_url, href)
+        if url in seen or url.rstrip("/") == base_url.rstrip("/"):
+            continue
+        if scoring.contains_primary_term(anchor) or _URL_LIMS_RE.search(url):
+            seen.add(url)
+            out.append((anchor, url))
+            if len(out) >= limit:
+                break
+    return out
 
 
 def _portal_target_url(portal: dict[str, Any]) -> str | None:

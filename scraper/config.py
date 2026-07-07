@@ -26,15 +26,15 @@ class ConfigError(RuntimeError):
 
 
 # Values that look like an un-filled ``.env.example`` placeholder. We refuse to
-# run with these so a live run never silently uses fake credentials.
+# run with these so a live run never silently uses fake credentials. Markers
+# are chosen so no real random credential can contain them (no hex/base64
+# substrings like "xxxx").
 _PLACEHOLDER_MARKERS = (
     "your-",
     "your_",
     "changeme",
     "replace-me",
     "replace_me",
-    "xxxx",
-    "<",
     "example.com",
 )
 
@@ -50,6 +50,8 @@ def get(name: str, default: str | None = None) -> str | None:
 
 def _looks_like_placeholder(value: str) -> bool:
     low = value.lower()
+    if low.startswith("<") and low.endswith(">"):
+        return True
     return any(marker in low for marker in _PLACEHOLDER_MARKERS)
 
 
@@ -62,9 +64,11 @@ def require(name: str) -> str:
             f"Copy .env.example to .env and fill it in."
         )
     if _looks_like_placeholder(value):
+        # Deliberately does NOT echo the value: this message can end up in cron
+        # logs and the variable may hold a real (if oddly-shaped) secret.
         raise ConfigError(
-            f"Environment variable {name!r} still contains a placeholder value "
-            f"({value!r}). Fill in the real value before running."
+            f"Environment variable {name!r} looks like an unfilled .env.example "
+            f"placeholder. Fill in the real value before running."
         )
     return value
 
@@ -107,19 +111,47 @@ MIN_RELEVANCE_SCORE = 65
 # Primary LIMS signals. Presence of one of these in the title/description is
 # what makes an opportunity genuinely LIMS-related. Matched case-insensitively
 # with word boundaries (see scoring.py).
-LIMS_PRIMARY_TERMS = (
+#
+# CORE terms are unambiguous on their own. CONTEXTUAL terms (specimen/sample
+# tracking or management) also describe physical logistics work (couriers,
+# transport), so they only count as primary when a software-context word is
+# present too -- otherwise a "Specimen Courier Services" RFP would qualify.
+LIMS_CORE_PRIMARY_TERMS = (
     "laboratory information management system",
     "laboratory information management systems",
     "laboratory information system",
     "laboratory informatics",
     "lims",
     "electronic laboratory notebook",
-    "specimen tracking",
-    "specimen management",
-    "sample management system",
     "laboratory data management",
     "scientific data management system",
 )
+
+LIMS_CONTEXTUAL_PRIMARY_TERMS = (
+    "specimen tracking",
+    "specimen management",
+    "sample tracking",
+    "sample management system",
+)
+
+# Words indicating a software/system procurement (vs physical logistics).
+SOFTWARE_CONTEXT_TERMS = (
+    "system",
+    "software",
+    "solution",
+    "platform",
+    "informatics",
+    "application",
+    "database",
+    "module",
+    "electronic",
+    "digital",
+    "automation",
+    "interface",
+)
+
+# Union, for callers that just need "any primary term" (e.g. link filtering).
+LIMS_PRIMARY_TERMS = LIMS_CORE_PRIMARY_TERMS + LIMS_CONTEXTUAL_PRIMARY_TERMS
 
 # Secondary/context signals. On their own these do not qualify a notice, but
 # they add confidence when a primary term is also present.
@@ -138,14 +170,18 @@ LIMS_SECONDARY_TERMS = (
     "accessioning",
 )
 
-# Search phrases sent to the SAM.gov ``q`` parameter. Kept tight so recall is
-# LIMS-targeted; scoring.py re-validates every hit against the terms above.
+# Search phrases sent to the SAM.gov ``title`` parameter (the public v2 API has
+# no free-text ``q`` param; ``title`` does substring matching on notice titles).
+# "laboratory information" also covers "...management system" and
+# "...system" title variants. scoring.py re-validates every hit -- including
+# its fetched description -- against the term lists above.
 SAM_SEARCH_QUERIES = (
-    "laboratory information management system",
     "LIMS",
+    "laboratory information",
     "laboratory informatics",
-    "specimen management",
     "electronic laboratory notebook",
+    "specimen tracking",
+    "specimen management",
 )
 
 # NAICS codes commonly associated with LIMS procurements. A match adds a small

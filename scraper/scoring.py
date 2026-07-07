@@ -15,11 +15,14 @@ from dataclasses import dataclass, field
 
 from . import config
 
-# Score weights. Tuned so that a genuine LIMS notice (a primary term present)
-# clears the 65 gate, while a notice that merely mentions "laboratory" in
-# passing (secondary terms only) cannot.
-_TITLE_PRIMARY = 55          # a primary LIMS term in the title
-_DESC_PRIMARY = 40           # a primary LIMS term in the description
+# Score weights. Tuned so that a genuine LIMS notice always clears the 65 gate
+# -- a primary LIMS term in the TITLE is by itself decisive (65), so a notice
+# titled "Laboratory Information Management System Replacement" cannot be
+# dropped just because its description fetch failed or its NAICS is unusual.
+# A notice that merely mentions "laboratory" in passing (secondary terms only,
+# capped at 20) can never reach the gate.
+_TITLE_PRIMARY = 65          # a primary LIMS term in the title (decisive)
+_DESC_PRIMARY = 40           # a primary LIMS term only in the description
 _EXTRA_PRIMARY = 10          # each additional distinct primary term
 _EXTRA_PRIMARY_CAP = 20
 _SECONDARY = 5               # each distinct secondary term
@@ -39,7 +42,7 @@ class RelevanceResult:
     def is_relevant(self) -> bool:
         return self.score >= config.MIN_RELEVANCE_SCORE
 
-    def keyword_tags(self) -> list[str]:
+    def keyword_tags(self, *, source_tag: str = config.SOURCE_TAG_SAM) -> list[str]:
         """Return the concrete matched terms to store in the keywords column.
 
         These are real, matched signals -- not guesses. The Source tag lets the
@@ -52,7 +55,7 @@ class RelevanceResult:
                 tags.append(term)
             if len(tags) >= 6:
                 break
-        tags.append(config.SOURCE_TAG_SAM)
+        tags.append(source_tag)
         return tags
 
 
@@ -65,8 +68,11 @@ def _term_pattern(term: str) -> re.Pattern[str]:
 
 
 # Pre-compile once.
-_PRIMARY_PATTERNS = [(t, _term_pattern(t)) for t in config.LIMS_PRIMARY_TERMS]
+_CORE_PRIMARY_PATTERNS = [(t, _term_pattern(t)) for t in config.LIMS_CORE_PRIMARY_TERMS]
+_CONTEXTUAL_PRIMARY_PATTERNS = [(t, _term_pattern(t)) for t in config.LIMS_CONTEXTUAL_PRIMARY_TERMS]
+_PRIMARY_PATTERNS = _CORE_PRIMARY_PATTERNS + _CONTEXTUAL_PRIMARY_PATTERNS
 _SECONDARY_PATTERNS = [(t, _term_pattern(t)) for t in config.LIMS_SECONDARY_TERMS]
+_SOFTWARE_CONTEXT_PATTERNS = [(t, _term_pattern(t)) for t in config.SOFTWARE_CONTEXT_TERMS]
 
 
 def _distinct_matches(text: str, patterns: list[tuple[str, re.Pattern[str]]]) -> list[str]:
@@ -75,6 +81,18 @@ def _distinct_matches(text: str, patterns: list[tuple[str, re.Pattern[str]]]) ->
         if pattern.search(text):
             found.append(term)
     return found
+
+
+def contains_primary_term(text: str) -> bool:
+    """True if the text contains any primary LIMS term (word-boundary match).
+
+    Used by the Firecrawl pipeline to select which scraped listing links are
+    worth following; the full relevance gate still runs on each detail page.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    return any(pattern.search(low) for _, pattern in _PRIMARY_PATTERNS)
 
 
 def score_opportunity(
@@ -89,8 +107,19 @@ def score_opportunity(
     combined = f"{title_l}\n{desc_l}"
     naics_codes = naics_codes or []
 
-    primary_in_title = _distinct_matches(title_l, _PRIMARY_PATTERNS)
-    primary_all = _distinct_matches(combined, _PRIMARY_PATTERNS)
+    # Contextual primary terms (specimen/sample tracking or management) also
+    # describe courier/logistics work; they only count as primary when the
+    # text shows a software/system context.
+    has_software_context = bool(_distinct_matches(combined, _SOFTWARE_CONTEXT_PATTERNS))
+
+    def _primaries(text: str) -> list[str]:
+        found = _distinct_matches(text, _CORE_PRIMARY_PATTERNS)
+        if has_software_context:
+            found += _distinct_matches(text, _CONTEXTUAL_PRIMARY_PATTERNS)
+        return found
+
+    primary_in_title = _primaries(title_l)
+    primary_all = _primaries(combined)
     secondary_all = _distinct_matches(combined, _SECONDARY_PATTERNS)
     matched_naics = [c for c in naics_codes if c in config.LIMS_RELEVANT_NAICS]
 
