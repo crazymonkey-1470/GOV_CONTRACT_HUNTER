@@ -93,7 +93,12 @@ class FirecrawlClient:
     def __init__(self, base_url: str, api_key: str | None = None, *, timeout: float | None = None) -> None:
         if not base_url:
             raise FirecrawlError("FIRECRAWL_URL is required")
-        self.base_url = base_url.rstrip("/")
+        base = base_url.strip().rstrip("/")
+        # Tolerate a bare hostname (e.g. "myfirecrawl.up.railway.app") -- an
+        # URL without a scheme fails every request at the client layer.
+        if not re.match(r"^https?://", base, re.IGNORECASE):
+            base = "https://" + base
+        self.base_url = base
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
