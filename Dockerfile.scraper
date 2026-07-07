@@ -1,0 +1,17 @@
+# ContractHunter LIMS scraper — Railway cron image.
+# The Next.js dashboard deploys separately; this image only runs the Python
+# scraper once per invocation (Railway cron restarts it on schedule).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies first so code edits don't bust the pip layer.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY scraper/ scraper/
+
+# All configuration comes from Railway service env vars (no .env in the image):
+# SUPABASE_URL, SUPABASE_SERVICE_KEY, SAM_API_KEY, ANTHROPIC_API_KEY (optional),
+# FIRECRAWL_URL, FIRECRAWL_API_KEY, LOOKBACK_DAYS.
+CMD ["python", "-m", "scraper.run"]
