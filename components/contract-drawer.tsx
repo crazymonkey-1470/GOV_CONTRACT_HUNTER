@@ -20,6 +20,7 @@ import {
   visibleKeywords,
 } from "@/lib/contracts";
 import { formatCurrency, formatDate, getDeadlineInfo } from "@/lib/format";
+import { TARGET_NAICS, TARGET_PSC, pscOf } from "@/lib/priority";
 import { cn } from "@/lib/utils";
 import type { Opportunity } from "@/lib/types";
 
@@ -57,6 +58,7 @@ export function ContractDrawer({
   const value = o ? formatCurrency(o.value) : "Not Specified";
   const hasValue = value !== "Not Specified";
   const naics = o ? naicsList(o) : [];
+  const psc = o ? pscOf(o) : null;
   const requirements = o ? requirementsList(o) : [];
   const keywords = o ? visibleKeywords(o, 10) : [];
   const saved = o ? isSaved(o.id) : false;
@@ -91,7 +93,42 @@ export function ContractDrawer({
                 ) : null}
                 {naics.length ? (
                   <Fact label="NAICS">
-                    <span className="font-mono">{naics.join(", ")}</span>
+                    <span className="font-mono">
+                      {naics.map((code, index) => (
+                        <span key={code}>
+                          {index > 0 ? ", " : ""}
+                          <span
+                            className={cn(
+                              TARGET_NAICS.has(code) && "font-semibold text-primary",
+                            )}
+                            title={
+                              TARGET_NAICS.has(code)
+                                ? "Target LIMS-consulting NAICS code"
+                                : undefined
+                            }
+                          >
+                            {code}
+                          </span>
+                        </span>
+                      ))}
+                    </span>
+                  </Fact>
+                ) : null}
+                {psc ? (
+                  <Fact label="PSC">
+                    <span
+                      className={cn(
+                        "font-mono",
+                        TARGET_PSC.has(psc) && "font-semibold text-primary",
+                      )}
+                      title={
+                        TARGET_PSC.has(psc)
+                          ? "Target LIMS-consulting product service code"
+                          : undefined
+                      }
+                    >
+                      {psc}
+                    </span>
                   </Fact>
                 ) : null}
                 {hasValue ? <Fact label="Est. value">{value}</Fact> : null}

@@ -1,9 +1,10 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Target } from "lucide-react";
 
 import { MatchBadge } from "@/components/match-badge";
 import { deadlineToneClass } from "@/lib/contracts";
+import { codePriority } from "@/lib/priority";
 import { getDeadlineInfo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Opportunity } from "@/lib/types";
@@ -45,8 +46,14 @@ export function ContractTable({
                   <MatchBadge score={opportunity.relevance_score} />
                 </td>
                 <td className="px-2 py-3">
-                  <div className="font-medium text-foreground">
-                    {opportunity.title}
+                  <div className="flex items-center gap-1.5 font-medium text-foreground">
+                    {codePriority(opportunity) ? (
+                      <Target
+                        className="h-3.5 w-3.5 shrink-0 text-primary"
+                        aria-label="Target LIMS-consulting classification code"
+                      />
+                    ) : null}
+                    <span>{opportunity.title}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {opportunity.agency}

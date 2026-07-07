@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSaved } from "@/components/saved-provider";
 import { deadlineToneClass, naicsList } from "@/lib/contracts";
+import { TARGET_NAICS } from "@/lib/priority";
 import { formatCurrency, getDeadlineInfo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Opportunity } from "@/lib/types";
@@ -26,7 +27,10 @@ export function ContractCard({
   const deadline = getDeadlineInfo(opportunity.response_deadline, new Date(now));
   const value = formatCurrency(opportunity.value);
   const hasValue = value !== "Not Specified";
-  const naics = naicsList(opportunity)[0];
+  // Prefer showing a target LIMS-consulting code when the notice carries one.
+  const allNaics = naicsList(opportunity);
+  const naics = allNaics.find((code) => TARGET_NAICS.has(code)) ?? allNaics[0];
+  const naicsIsTarget = naics ? TARGET_NAICS.has(naics) : false;
 
   return (
     <div
@@ -77,7 +81,14 @@ export function ContractCard({
           <Badge variant="outline">{opportunity.notice_type}</Badge>
         ) : null}
         {naics ? (
-          <Badge variant="outline" className="font-mono text-[11px]">
+          <Badge
+            variant="outline"
+            className={cn(
+              "font-mono text-[11px]",
+              naicsIsTarget && "border-primary/50 text-primary",
+            )}
+            title={naicsIsTarget ? "Target LIMS-consulting NAICS code" : undefined}
+          >
             NAICS {naics}
           </Badge>
         ) : null}

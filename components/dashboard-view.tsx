@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { useSaved } from "@/components/saved-provider";
 import { naicsList, scoreOf } from "@/lib/contracts";
 import { getDeadlineInfo } from "@/lib/format";
+import { codePriority, priorityRank } from "@/lib/priority";
 import { cn } from "@/lib/utils";
 import type { Opportunity } from "@/lib/types";
 
@@ -45,6 +46,7 @@ export function DashboardView({
   const [status, setStatus] = useState<Status>("active");
   const [setAside, setSetAside] = useState<string>("all");
   const [savedOnly, setSavedOnly] = useState(false);
+  const [priorityOnly, setPriorityOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("match");
   const [view, setView] = useState<ViewMode>("cards");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export function DashboardView({
     const filtered = base.filter((o) => {
       if (setAside !== "all" && o.set_aside !== setAside) return false;
       if (savedOnly && !isSaved(o.id)) return false;
+      if (priorityOnly && codePriority(o) === null) return false;
       if (!q) return true;
       const haystack = [
         o.title,
@@ -117,7 +120,14 @@ export function DashboardView({
 
     const sorted = [...filtered];
     if (sort === "match") {
-      sorted.sort((a, b) => scoreOf(b) - scoreOf(a));
+      // Score first; among equal scores, target-code opportunities
+      // (541512 ahead of the other target NAICS/PSCs) rank higher.
+      sorted.sort(
+        (a, b) =>
+          scoreOf(b) - scoreOf(a) ||
+          priorityRank(a) - priorityRank(b) ||
+          (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+      );
     } else if (sort === "deadline") {
       const daysOf = (o: Opportunity) => {
         const days = getDeadlineInfo(o.response_deadline, reference).days;
@@ -130,7 +140,7 @@ export function DashboardView({
       );
     }
     return sorted;
-  }, [activeAll, expiredAll, status, setAside, savedOnly, query, sort, now, isSaved]);
+  }, [activeAll, expiredAll, status, setAside, savedOnly, priorityOnly, query, sort, now, isSaved]);
 
   const openOpportunity = openId
     ? (opportunities.find((o) => o.id === openId) ?? null)
@@ -242,6 +252,22 @@ export function DashboardView({
               {option}
             </Chip>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setPriorityOnly((value) => !value)}
+            aria-pressed={priorityOnly}
+            title="Only opportunities carrying a target LIMS-consulting NAICS (541512, 541511, 541690, 541611, 541519) or PSC (DA01, DJ01, DB02, R425, R408, R499)"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+              priorityOnly
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Target className="h-3.5 w-3.5" />
+            Priority codes
+          </button>
 
           <button
             type="button"
