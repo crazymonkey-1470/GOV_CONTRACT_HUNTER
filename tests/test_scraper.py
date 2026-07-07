@@ -186,6 +186,35 @@ class SearchParamContract(unittest.TestCase):
         self.assertEqual(params["postedFrom"], "06/01/2026")
         self.assertEqual(params["postedTo"], "07/01/2026")
 
+    def test_naics_and_psc_sweep_fields(self):
+        from datetime import date
+        p = SamClient._search_params("541512", date(2026, 6, 1), date(2026, 7, 1), 100, 0, field="ncode")
+        self.assertEqual(p["ncode"], "541512")
+        self.assertNotIn("title", p)
+        p = SamClient._search_params("DA01", date(2026, 6, 1), date(2026, 7, 1), 100, 0, field="ccode")
+        self.assertEqual(p["ccode"], "DA01")
+        from scraper.sam_api import SamApiError
+        with self.assertRaises(SamApiError):
+            SamClient._search_params("x", date(2026, 6, 1), date(2026, 7, 1), 100, 0, field="bogus")
+
+    def test_sweep_list_env_override(self):
+        import os
+        self.assertEqual(config.sweep_list("_CH_NO_SUCH", ("a", "b")), ("a", "b"))
+        os.environ["_CH_SWEEP"] = "541512, 541511"
+        try:
+            self.assertEqual(config.sweep_list("_CH_SWEEP", ("x",)), ("541512", "541511"))
+            os.environ["_CH_SWEEP"] = "off"
+            self.assertEqual(config.sweep_list("_CH_SWEEP", ("x",)), ())
+        finally:
+            del os.environ["_CH_SWEEP"]
+
+    def test_psc_match_boosts_score(self):
+        base = dict(title="Business application support for the clinical laboratory",
+                    description="Support the lab's LIMS interfaces.", naics_codes=[])
+        without = scoring.score_opportunity(**base)
+        with_psc = scoring.score_opportunity(**base, psc_code="DA01")
+        self.assertEqual(with_psc.score, without.score + 10)
+
 
 class LookbackWidening(unittest.TestCase):
     def test_schedule_widens_to_90(self):
