@@ -423,6 +423,15 @@ def run_firecrawl(*, limit: int = 1, dry_run: bool = False, listings_per_portal:
                     "[firecrawl] no LIMS-relevant listing links extractable from this "
                     "page -- consider adding a pre-built keyword search_url (see GO_LIVE.md)"
                 )
+                # Show what the scrape actually returned so the failure mode is
+                # diagnosable from Railway logs (JS-only app, login wall, bot
+                # block, empty results, ...). Tiny pages are printed whole.
+                excerpt = " ".join((scraped.markdown or "").split())[:400]
+                print(f"[firecrawl] page excerpt ({len(scraped.markdown)} chars): {excerpt!r}")
+                stats.warnings.append(
+                    f"portal '{portal.get('name')}' yielded no extractable listings "
+                    f"({len(scraped.markdown)} chars scraped)"
+                )
                 continue
 
             # Follow each real listing link and run the full relevance gate on
