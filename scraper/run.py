@@ -518,8 +518,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="run ONLY the SAM.gov pipeline")
     parser.add_argument("--dry-run", action="store_true", help="fetch + score but do not insert")
     parser.add_argument("--portal-limit", type=int,
-                        default=config.get_int("PORTAL_LIMIT", 1),
-                        help="portals to scrape per run (default 1, or PORTAL_LIMIT env)")
+                        default=config.get_int("PORTAL_LIMIT", 3),
+                        help="portals to scrape per run (default 3, or PORTAL_LIMIT env)")
     args = parser.parse_args(argv)
 
     _load_dotenv()
