@@ -263,6 +263,73 @@ class DotenvFallbackParser(unittest.TestCase):
                     os.environ.pop(k, None)
 
 
+class QuotaExhaustion(unittest.TestCase):
+    """A 429 quota response must abort immediately, not burn retries."""
+
+    QUOTA_BODY = {
+        "code": "900804",
+        "message": "Message throttled out",
+        "description": "You have exceeded your quota .You can access API after "
+                       "2026-Jul-08 00:00:00+0000 UTC",
+    }
+
+    def _client_with(self, handler):
+        import httpx
+        from scraper.sam_api import SamClient
+        sam = SamClient("test-key")
+        sam._client = httpx.Client(transport=httpx.MockTransport(handler))
+        return sam
+
+    def test_quota_429_raises_after_single_request(self):
+        import httpx
+        from datetime import date
+        from scraper.sam_api import SamQuotaError
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            return httpx.Response(429, json=self.QUOTA_BODY)
+
+        sam = self._client_with(handler)
+        with self.assertRaises(SamQuotaError):
+            sam.search(query="LIMS", posted_from=date(2026, 6, 1), posted_to=date(2026, 7, 1))
+        self.assertEqual(calls["n"], 1)          # no retry burn
+        self.assertTrue(sam.quota_exhausted)
+
+    def test_after_exhaustion_no_further_http_calls(self):
+        import httpx
+        from datetime import date
+        from scraper.sam_api import SamQuotaError
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            return httpx.Response(429, json=self.QUOTA_BODY)
+
+        sam = self._client_with(handler)
+        with self.assertRaises(SamQuotaError):
+            sam.search(query="LIMS", posted_from=date(2026, 6, 1), posted_to=date(2026, 7, 1))
+        # Description fetches short-circuit without touching the network.
+        self.assertEqual(sam.fetch_description("https://api.sam.gov/noticedesc?x=1"), "")
+        self.assertEqual(calls["n"], 1)
+
+    def test_generic_429_still_retries(self):
+        import httpx
+        from datetime import date
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return httpx.Response(429, text="slow down")  # transient, no quota marker
+            return httpx.Response(200, json={"totalRecords": 0, "opportunitiesData": []})
+
+        sam = self._client_with(handler)
+        out = sam.search(query="LIMS", posted_from=date(2026, 6, 1), posted_to=date(2026, 7, 1))
+        self.assertEqual(out, [])
+        self.assertEqual(calls["n"], 3)
+
+
 class InsertAttribution(unittest.TestCase):
     """_record_insert_outcome must attribute inserts from the representation."""
 

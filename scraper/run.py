@@ -26,7 +26,7 @@ from .firecrawl_client import (
     _portal_target_url,
     extract_listing_links,
 )
-from .sam_api import SamApiError, SamClient, default_window
+from .sam_api import SamApiError, SamClient, SamQuotaError, default_window
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +154,16 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
         for query in config.SAM_SEARCH_QUERIES:
             try:
                 batch = sam.search(query=query, posted_from=posted_from, posted_to=posted_to)
+            except SamQuotaError as exc:
+                # Daily quota is gone -- one clear error, stop all SAM calls.
+                stats.errors.append(
+                    f"SAM daily quota exhausted; aborting remaining searches. {exc} "
+                    f"(Non-federal personal keys get ~10 requests/day; associating "
+                    f"your SAM.gov account with your registered entity raises this "
+                    f"to ~1,000/day.)"
+                )
+                print(f"[sam] QUOTA EXHAUSTED -- stopping: {exc}")
+                break
             except SamApiError as exc:
                 stats.errors.append(f"SAM search '{query}': {exc}")
                 print(f"[sam] ERROR query '{query}': {exc}")

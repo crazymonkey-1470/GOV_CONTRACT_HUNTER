@@ -24,6 +24,20 @@ class SamApiError(RuntimeError):
     """Raised when the SAM.gov API returns an error or an unexpected payload."""
 
 
+class SamQuotaError(SamApiError):
+    """The API key's daily request quota is exhausted (429 code 900804).
+
+    Retrying is pointless until the quota resets (nextAccessTime in the body),
+    so callers should abort the run immediately instead of burning further
+    requests.
+    """
+
+
+def _is_quota_exhausted(body: str) -> bool:
+    low = (body or "").lower()
+    return "900804" in low or "exceeded your quota" in low or "throttled out" in low
+
+
 @dataclass
 class SamOpportunity:
     """A normalized view of a single SAM.gov notice.
@@ -86,6 +100,10 @@ class SamClient:
         if not api_key:
             raise SamApiError("SAM_API_KEY is required")
         self.api_key = api_key
+        # Set once the daily quota comes back exhausted; all further calls
+        # (searches, description fetches) short-circuit instead of burning
+        # requests against a dead quota.
+        self.quota_exhausted = False
         self._client = httpx.Client(
             timeout=timeout or config.HTTP_TIMEOUT_SECONDS,
             headers={"Accept": "application/json"},
@@ -103,6 +121,8 @@ class SamClient:
 
     # -- HTTP with retry/backoff ------------------------------------------
     def _get(self, url: str, params: dict[str, Any]) -> httpx.Response:
+        if self.quota_exhausted:
+            raise SamQuotaError("SAM.gov daily quota already exhausted this run")
         last_exc: Exception | None = None
         backoff = 2.0
         for attempt in range(1, config.HTTP_MAX_RETRIES + 1):
@@ -116,7 +136,15 @@ class SamClient:
                 backoff *= 2
                 continue
 
-            # 429/5xx are transient -> retry with backoff.
+            # Quota exhaustion (429 code 900804) resets at a fixed time --
+            # retrying only wastes requests. Abort the whole run instead.
+            if resp.status_code == 429 and _is_quota_exhausted(resp.text):
+                self.quota_exhausted = True
+                raise SamQuotaError(
+                    f"SAM.gov daily quota exhausted: {resp.text[:300]}"
+                )
+
+            # Other 429/5xx are transient -> retry with backoff.
             if resp.status_code in (429, 500, 502, 503, 504):
                 last_exc = SamApiError(
                     f"SAM.gov returned {resp.status_code}: {resp.text[:300]}"
