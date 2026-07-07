@@ -12,6 +12,7 @@ the live schema; keep it accurate.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Iterable
 
@@ -84,8 +85,10 @@ class SupabaseClient:
             raise DbError("SUPABASE_URL and SUPABASE_SERVICE_KEY are required")
         # Accept either the project base URL or one that already carries the
         # /rest/v1 suffix -- a doubled prefix yields PostgREST's PGRST125
-        # "Invalid path" on every request.
+        # "Invalid path" on every request. Also tolerate a missing scheme.
         base = url.strip().rstrip("/")
+        if base and not re.match(r"^https?://", base, re.IGNORECASE):
+            base = "https://" + base
         if base.endswith("/rest/v1"):
             base = base[: -len("/rest/v1")]
         self.rest_url = base + "/rest/v1"

@@ -339,9 +339,21 @@ class SupabaseUrlNormalization(unittest.TestCase):
             "https://x.supabase.co/rest/v1",
             "https://x.supabase.co/rest/v1/",
             " https://x.supabase.co/rest/v1/ ",
+            "x.supabase.co",  # missing scheme
         ):
             client = SupabaseClient(given, "key")
             self.assertEqual(client.rest_url, "https://x.supabase.co/rest/v1", given)
+            client.close()
+
+    def test_firecrawl_url_scheme_added(self):
+        from scraper.firecrawl_client import FirecrawlClient
+        for given, expected in (
+            ("myfc.up.railway.app", "https://myfc.up.railway.app"),
+            ("https://myfc.up.railway.app/", "https://myfc.up.railway.app"),
+            ("http://fc.railway.internal:3002", "http://fc.railway.internal:3002"),
+        ):
+            client = FirecrawlClient(given)
+            self.assertEqual(client.base_url, expected, given)
             client.close()
 
 
