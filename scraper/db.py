@@ -82,7 +82,13 @@ class SupabaseClient:
     def __init__(self, url: str, service_key: str, *, timeout: float | None = None) -> None:
         if not url or not service_key:
             raise DbError("SUPABASE_URL and SUPABASE_SERVICE_KEY are required")
-        self.rest_url = url.rstrip("/") + "/rest/v1"
+        # Accept either the project base URL or one that already carries the
+        # /rest/v1 suffix -- a doubled prefix yields PostgREST's PGRST125
+        # "Invalid path" on every request.
+        base = url.strip().rstrip("/")
+        if base.endswith("/rest/v1"):
+            base = base[: -len("/rest/v1")]
+        self.rest_url = base + "/rest/v1"
         self._client = httpx.Client(
             timeout=timeout or config.HTTP_TIMEOUT_SECONDS,
             headers={

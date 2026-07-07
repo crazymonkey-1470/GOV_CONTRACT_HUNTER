@@ -330,6 +330,21 @@ class QuotaExhaustion(unittest.TestCase):
         self.assertEqual(calls["n"], 3)
 
 
+class SupabaseUrlNormalization(unittest.TestCase):
+    def test_rest_v1_suffix_not_doubled(self):
+        from scraper.db import SupabaseClient
+        for given in (
+            "https://x.supabase.co",
+            "https://x.supabase.co/",
+            "https://x.supabase.co/rest/v1",
+            "https://x.supabase.co/rest/v1/",
+            " https://x.supabase.co/rest/v1/ ",
+        ):
+            client = SupabaseClient(given, "key")
+            self.assertEqual(client.rest_url, "https://x.supabase.co/rest/v1", given)
+            client.close()
+
+
 class InsertAttribution(unittest.TestCase):
     """_record_insert_outcome must attribute inserts from the representation."""
 
