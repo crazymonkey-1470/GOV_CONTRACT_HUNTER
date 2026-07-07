@@ -263,6 +263,40 @@ class DotenvFallbackParser(unittest.TestCase):
                     os.environ.pop(k, None)
 
 
+class InsertAttribution(unittest.TestCase):
+    """_record_insert_outcome must attribute inserts from the representation."""
+
+    RECORDS = [{"notice_id": "A"}, {"notice_id": "B"}]
+
+    def test_race_loser_reported_as_duplicate_not_insert(self):
+        from scraper.run import RunStats, _record_insert_outcome
+
+        class FakeSupa:  # only A actually inserted; B hit the conflict
+            def insert_opportunities(self, records):
+                return [{"notice_id": "A"}]
+
+        stats = RunStats()
+        _record_insert_outcome(FakeSupa(), self.RECORDS, stats)
+        self.assertEqual(stats.inserted, ["A"])
+        self.assertIn("B", stats.skipped_duplicate)
+        self.assertTrue(stats.warnings)
+
+    def test_missing_representation_falls_back_to_requery(self):
+        from scraper.run import RunStats, _record_insert_outcome
+
+        class FakeSupa:
+            def insert_opportunities(self, records):
+                return None  # body missing/unparseable
+
+            def existing_notice_ids(self, ids):
+                return {"A"}  # only A is actually present
+
+        stats = RunStats()
+        _record_insert_outcome(FakeSupa(), self.RECORDS, stats)
+        self.assertEqual(stats.inserted, ["A"])
+        self.assertTrue(any("not found after insert" in e for e in stats.errors))
+
+
 class ConfigGuards(unittest.TestCase):
     def test_placeholder_rejected_without_leaking_value(self):
         import os

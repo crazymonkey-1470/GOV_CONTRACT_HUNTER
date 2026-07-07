@@ -197,6 +197,8 @@ LIMS_RELEVANT_NAICS = frozenset(
         "541380",  # Testing Laboratories
         "334516",  # Analytical Laboratory Instrument Manufacturing
         "541714",  # R&D in Biotechnology
+        "511210",  # Software Publishers (2017 NAICS -- standard for COTS buys)
+        "513210",  # Software Publishers (2022 NAICS vintage)
     }
 )
 

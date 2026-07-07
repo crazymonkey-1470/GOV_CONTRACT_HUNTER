@@ -160,13 +160,15 @@ class SupabaseClient:
         return resp.json()
 
     # -- writes ------------------------------------------------------------
-    def insert_opportunities(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Insert new opportunity rows. Returns the inserted rows.
+    def insert_opportunities(self, records: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Insert new opportunity rows.
 
-        Uses ``Prefer: resolution=ignore-duplicates`` so a race on the UNIQUE
-        ``notice_id`` constraint is a no-op rather than an error. Callers should
-        still pre-filter with :meth:`existing_notice_ids` for accurate skip
-        reporting.
+        Returns the PostgREST representation: exactly the rows THIS request
+        inserted. Rows skipped by ``ON CONFLICT DO NOTHING`` (dedup race with a
+        concurrent run) are omitted from it, so callers can attribute inserts
+        precisely. Returns ``None`` only when the response body is missing or
+        unparseable -- callers should then verify presence by re-query instead
+        of assuming success.
         """
         if not records:
             return []
@@ -178,12 +180,13 @@ class SupabaseClient:
             headers={"Prefer": "resolution=ignore-duplicates,return=representation"},
             json=rows,
         )
-        if resp.status_code == 201 or resp.text:
-            try:
-                return resp.json()
-            except ValueError:
-                return []
-        return []
+        if not resp.text:
+            return None
+        try:
+            body = resp.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, list) else None
 
     def touch_portal_last_checked(self, portal_id: str, timestamp: str) -> None:
         """Set a portal's last_checked to the given ISO timestamp."""

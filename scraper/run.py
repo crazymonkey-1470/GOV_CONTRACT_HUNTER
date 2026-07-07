@@ -226,23 +226,42 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
     assert supa is not None
     to_insert = qualifying
     if to_insert:
-        sent_ids = [r["notice_id"] for r in to_insert]
         try:
-            supa.insert_opportunities(to_insert)
-            # Trust, but verify: confirm the rows are actually present rather
-            # than assuming the POST landed. Only confirmed IDs are reported
-            # as inserted.
-            now_present = supa.existing_notice_ids(sent_ids)
-            stats.inserted = [nid for nid in sent_ids if nid in now_present]
-            missing = [nid for nid in sent_ids if nid not in now_present]
-            if missing:
-                stats.errors.append(
-                    f"{len(missing)} rows sent but not found after insert: {missing}"
-                )
+            _record_insert_outcome(supa, to_insert, stats)
         except DbError as exc:
             stats.errors.append(f"insert: {exc}")
     supa.close()
     return stats
+
+
+def _record_insert_outcome(supa: SupabaseClient, to_insert: list[dict], stats: RunStats) -> None:
+    """Insert rows and attribute the outcome precisely.
+
+    PostgREST's representation lists exactly the rows THIS request inserted;
+    rows omitted from it hit the ``notice_id`` conflict (a concurrent run won
+    the race) and are reported as duplicates, not inserts. Only when the
+    response body is unusable do we fall back to presence-by-re-query.
+    """
+    sent_ids = [r["notice_id"] for r in to_insert]
+    inserted_rows = supa.insert_opportunities(to_insert)
+    if inserted_rows is not None:
+        returned = {r.get("notice_id") for r in inserted_rows if r.get("notice_id")}
+        stats.inserted = [nid for nid in sent_ids if nid in returned]
+        raced = [nid for nid in sent_ids if nid not in returned]
+        if raced:
+            stats.skipped_duplicate = sorted(set(stats.skipped_duplicate) | set(raced))
+            stats.warnings.append(
+                f"{len(raced)} rows hit the notice_id conflict at insert time "
+                f"(concurrent run?): {raced}"
+            )
+        return
+    # No usable representation: verify presence rather than assuming success.
+    now_present = supa.existing_notice_ids(sent_ids)
+    stats.inserted = [nid for nid in sent_ids if nid in now_present]
+    missing = [nid for nid in sent_ids if nid not in now_present]
+    stats.warnings.append("insert response had no representation; verified by re-query")
+    if missing:
+        stats.errors.append(f"{len(missing)} rows sent but not found after insert: {missing}")
 
 
 def _build_record(opp, result, *, use_llm: bool) -> dict:
@@ -439,12 +458,7 @@ def run_firecrawl(*, limit: int = 1, dry_run: bool = False, listings_per_portal:
             stats.skipped_duplicate = sorted(already)
             to_insert = [r for r in qualifying if r["notice_id"] not in already]
             if to_insert:
-                supa.insert_opportunities(to_insert)
-                now_present = supa.existing_notice_ids([r["notice_id"] for r in to_insert])
-                stats.inserted = [r["notice_id"] for r in to_insert if r["notice_id"] in now_present]
-                missing = [r["notice_id"] for r in to_insert if r["notice_id"] not in now_present]
-                if missing:
-                    stats.errors.append(f"rows sent but not found after insert: {missing}")
+                _record_insert_outcome(supa, to_insert, stats)
         except DbError as exc:
             stats.errors.append(f"insert: {exc}")
 
