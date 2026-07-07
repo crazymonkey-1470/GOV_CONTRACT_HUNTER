@@ -249,6 +249,24 @@ class FirecrawlListingExtraction(unittest.TestCase):
         from scraper.firecrawl_client import extract_listing_links
         self.assertEqual(extract_listing_links("", base_url="https://x.gov"), [])
 
+    def test_same_page_fragment_anchors_excluded(self):
+        # Regression: on a ?q=LIMS search page, "#tab-N" anchors resolve to the
+        # same page (with the LIMS query inherited) and must not be followed.
+        from scraper.firecrawl_client import extract_listing_links
+        base = "https://www.highergov.com/all/?q=LIMS"
+        md = (
+            "[Contracts (8)](#tab-8)\n"
+            "[Awards (23)](https://www.highergov.com/all/?q=LIMS#tab-23)\n"
+            "[LIMS Replacement RFP](https://www.highergov.com/contract-opportunity/lims-2431/)\n"
+        )
+        links = extract_listing_links(md, base_url=base)
+        urls = [u for _, u in links]
+        self.assertEqual(
+            urls, ["https://www.highergov.com/contract-opportunity/lims-2431/"]
+        )
+        # Stored URLs carry no fragments.
+        self.assertTrue(all("#" not in u for u in urls))
+
     def test_deterministic_notice_id(self):
         from scraper.run import _firecrawl_notice_id
         a = _firecrawl_notice_id("https://portal.gov/rfp/2431")
