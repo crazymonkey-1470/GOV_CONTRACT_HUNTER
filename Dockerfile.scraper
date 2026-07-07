@@ -3,6 +3,10 @@
 # scraper once per invocation (Railway cron restarts it on schedule).
 FROM python:3.12-slim
 
+# Stream prints immediately so Railway's log view shows live progress and the
+# final RUN SUMMARY is never stuck in a buffer when the container exits.
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Install dependencies first so code edits don't bust the pip layer.
