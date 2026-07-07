@@ -14,6 +14,21 @@ _Last updated: 2026-07-07 (session: scraper build + live-schema verification)._
 | 5. Dedup proof (2nd run, 0 inserts) | ⛔ blocked | Same egress block |
 | 6. Firecrawl proof (non-SAM portal) | ⛔ blocked | Same egress block + no Docker daemon in sandbox to self-host Firecrawl |
 
+Additional hardening completed while blocked (not a substitute for Steps 4–6):
+
+- **Adversarial multi-agent code review** of the scraper; every confirmed
+  finding fixed (SAM v2 `title` vs `q` param, dedup-before-description-fetch,
+  auto-widening lookback, Firecrawl listing-follow + inserts, `--dry-run` in
+  firecrawl mode, scoring calibration, secret-safe error messages).
+- **31 offline tests**, including a 5-test end-to-end integration harness
+  (`tests/test_integration_stub.py`) that drives the real pipeline over HTTP
+  against local stub SAM/PostgREST/Firecrawl endpoints: first run inserts the
+  LIMS notice and rejects a janitorial decoy; second run inserts 0 and reports
+  the duplicate; Firecrawl follows only LIMS listing links, inserts a gated
+  `FC-` row, dedups on rerun; dry-run writes nothing. The stub asserts contract
+  details (`title` param, MM/DD/YYYY window, `on_conflict=notice_id`,
+  `Prefer: resolution=ignore-duplicates`, arrays as JSON lists, jsonb objects).
+
 ## Unblocking Steps 4–6 (either path works)
 
 **Path A — open this sandbox's network** (then the assistant runs Steps 4–6 and pastes RUN SUMMARYs):
