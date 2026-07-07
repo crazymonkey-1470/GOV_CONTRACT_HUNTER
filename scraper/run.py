@@ -503,20 +503,42 @@ def print_summary(mode: str, stats: RunStats) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ContractHunter LIMS scraper")
-    parser.add_argument("--firecrawl", action="store_true", help="run the non-SAM portal pipeline")
+    parser.add_argument("--firecrawl", action="store_true",
+                        help="run ONLY the non-SAM portal pipeline")
+    parser.add_argument("--sam-only", action="store_true",
+                        help="run ONLY the SAM.gov pipeline")
     parser.add_argument("--dry-run", action="store_true", help="fetch + score but do not insert")
-    parser.add_argument("--portal-limit", type=int, default=1, help="portals to scrape (firecrawl mode)")
+    parser.add_argument("--portal-limit", type=int,
+                        default=config.get_int("PORTAL_LIMIT", 1),
+                        help="portals to scrape per run (default 1, or PORTAL_LIMIT env)")
     args = parser.parse_args(argv)
 
     _load_dotenv()
 
+    suffix = " (dry-run)" if args.dry_run else ""
+    error_count = 0
     try:
-        if args.firecrawl:
-            stats = run_firecrawl(limit=args.portal_limit, dry_run=args.dry_run)
-            print_summary("FIRECRAWL" + (" (dry-run)" if args.dry_run else ""), stats)
-        else:
+        run_sam_pipeline = not args.firecrawl
+        run_fc_pipeline = not args.sam_only
+
+        if run_sam_pipeline:
             stats = run_sam(dry_run=args.dry_run)
-            print_summary("SAM.gov" + (" (dry-run)" if args.dry_run else ""), stats)
+            print_summary("SAM.gov" + suffix, stats)
+            error_count += len(stats.errors)
+
+        if run_fc_pipeline:
+            # The portal pipeline is independent of SAM: it must still run
+            # (and can still insert opportunities) when SAM's quota is gone.
+            # Skipped gracefully when Firecrawl isn't configured.
+            if config.get(config.ENV_FIRECRAWL_URL):
+                fc_stats = run_firecrawl(limit=args.portal_limit, dry_run=args.dry_run)
+                print_summary("FIRECRAWL" + suffix, fc_stats)
+                error_count += len(fc_stats.errors)
+            elif args.firecrawl:
+                print("\nCONFIG ERROR: FIRECRAWL_URL is not set", file=sys.stderr)
+                return 2
+            else:
+                print("[firecrawl] FIRECRAWL_URL not set -- portal pipeline skipped")
     except config.ConfigError as exc:
         print(f"\nCONFIG ERROR: {exc}", file=sys.stderr)
         return 2
@@ -525,10 +547,8 @@ def main(argv: list[str] | None = None) -> int:
         traceback.print_exc()
         return 1
 
-    # Non-zero exit if anything errored, so cron/Railway surfaces failures.
-    if stats.errors:
-        return 1
-    return 0
+    # Non-zero exit if any pipeline errored, so cron/Railway surfaces failures.
+    return 1 if error_count else 0
 
 
 if __name__ == "__main__":

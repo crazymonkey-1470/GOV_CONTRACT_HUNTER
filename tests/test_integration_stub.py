@@ -311,6 +311,15 @@ class OfflineIntegration(unittest.TestCase):
         self.assertEqual(stats.inserted, [])
         self.assertEqual(len(stats.skipped_duplicate), 1)
 
+    def test_6_default_mode_runs_both_pipelines(self):
+        # No flags = SAM + Firecrawl in one run, independent of each other;
+        # everything is a duplicate by now so exit code is 0 with 0 inserts.
+        from scraper.run import main
+        rows_before = dict(self.state.opportunities)
+        rc = main([])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.state.opportunities, rows_before)
+
     def test_5_dry_run_writes_nothing(self):
         from scraper.run import run_firecrawl
         before_rows = dict(self.state.opportunities)
