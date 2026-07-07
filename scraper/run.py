@@ -147,13 +147,23 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
     use_llm = enrichment.is_available()
     print(f"[sam] lookback window: {lookback} days   LLM enrichment: {'on' if use_llm else 'off'}")
 
+    # Search plan, most-precise first so a small quota is spent on the
+    # highest-value requests: title keywords, then NAICS sweeps, then PSC
+    # sweeps. Sweeps cast a wide net on purpose -- the relevance gate (not the
+    # search) decides what qualifies.
+    search_plan: list[tuple[str, str]] = [("title", q) for q in config.SAM_SEARCH_QUERIES]
+    search_plan += [("ncode", c) for c in config.sweep_list("NAICS_SWEEP", config.SAM_NAICS_SWEEP)]
+    search_plan += [("ccode", c) for c in config.sweep_list("PSC_SWEEP", config.SAM_PSC_SWEEP)]
+
     raw_by_id: dict[str, dict] = {}
     with SamClient(sam_key) as sam:
         posted_from, posted_to = default_window(lookback)
-        print(f"[sam] searching {posted_from} .. {posted_to}")
-        for query in config.SAM_SEARCH_QUERIES:
+        print(f"[sam] searching {posted_from} .. {posted_to}  ({len(search_plan)} filters)")
+        for field, query in search_plan:
             try:
-                batch = sam.search(query=query, posted_from=posted_from, posted_to=posted_to)
+                batch = sam.search(
+                    query=query, posted_from=posted_from, posted_to=posted_to, field=field
+                )
             except SamQuotaError as exc:
                 # Daily quota is gone -- one clear error, stop all SAM calls.
                 stats.errors.append(
@@ -165,15 +175,15 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
                 print(f"[sam] QUOTA EXHAUSTED -- stopping: {exc}")
                 break
             except SamApiError as exc:
-                stats.errors.append(f"SAM search '{query}': {exc}")
-                print(f"[sam] ERROR query '{query}': {exc}")
+                stats.errors.append(f"SAM search {field}='{query}': {exc}")
+                print(f"[sam] ERROR {field}='{query}': {exc}")
                 continue
             stats.fetched += len(batch)
             for rec in batch:
                 nid = rec.get("noticeId") or rec.get("id")
                 if nid:
                     raw_by_id.setdefault(str(nid), rec)
-            print(f"[sam]   '{query}': {len(batch)} records")
+            print(f"[sam]   {field}='{query}': {len(batch)} records")
 
         stats.unique = len(raw_by_id)
         print(f"[sam] {stats.fetched} records fetched, {stats.unique} unique notices")
@@ -198,25 +208,48 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
                 print(f"[sam] {len(stats.skipped_duplicate)} notices already in DB (skipped)")
 
         # Score each NEW notice against its real title + fetched description.
+        # NAICS/PSC sweeps can surface hundreds of candidates, and each
+        # description costs one API request -- so fetches are budgeted
+        # (DESC_FETCH_LIMIT, default 200) and prioritized: titles with a
+        # primary LIMS term first, then secondary-term titles, then the rest.
+        # Notices past the budget get title-only scoring (stricter, never
+        # looser) and are retried on later runs.
+        def _fetch_priority(nid: str) -> tuple[int, str]:
+            title = (raw_by_id[nid].get("title") or "")
+            if scoring.contains_primary_term(title):
+                rank = 0
+            elif scoring.contains_secondary_term(title):
+                rank = 1
+            else:
+                rank = 2
+            return (rank, nid)
+
+        new_ids = sorted((n for n in raw_by_id if n not in existing), key=_fetch_priority)
+        fetch_budget = config.get_int("DESC_FETCH_LIMIT", 200)
+        skipped_fetches = 0
+
         qualifying: list[dict] = []
-        for nid, rec in raw_by_id.items():
-            if nid in existing:
-                continue
+        for nid in new_ids:
+            rec = raw_by_id[nid]
+            wants_fetch = bool(rec.get("description"))
+            do_fetch = wants_fetch and fetch_budget > 0 and not sam.quota_exhausted
             try:
-                opp = sam.normalize(rec, with_description=True)
+                opp = sam.normalize(rec, with_description=do_fetch)
             except SamApiError as exc:
                 stats.errors.append(f"normalize {nid}: {exc}")
                 continue
-
-            if not opp.description and rec.get("description"):
-                # The notice HAS a description we could not fetch; say so --
-                # title-only scoring is stricter, never looser.
-                stats.warnings.append(f"description fetch failed for {nid}; scored title-only")
+            if do_fetch:
+                fetch_budget -= 1
+                if not opp.description:
+                    stats.warnings.append(f"description fetch failed for {nid}; scored title-only")
+            elif wants_fetch:
+                skipped_fetches += 1
 
             result = scoring.score_opportunity(
                 title=opp.title,
                 description=opp.description,
                 naics_codes=opp.naics_codes,
+                psc_code=opp.psc_code,
             )
             if not result.is_relevant:
                 stats.below_threshold += 1
@@ -227,6 +260,12 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
             qualifying.append(record)
             print(
                 f"[score] {result.score:>3}  {opp.notice_id}  {opp.title[:70]}"
+            )
+
+        if skipped_fetches:
+            stats.warnings.append(
+                f"{skipped_fetches} swept notices scored title-only (description "
+                f"fetch budget/quota reached); they retry on later runs"
             )
 
     if dry_run:

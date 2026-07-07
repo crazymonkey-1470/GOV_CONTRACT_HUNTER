@@ -95,11 +95,24 @@ def contains_primary_term(text: str) -> bool:
     return any(pattern.search(low) for _, pattern in _PRIMARY_PATTERNS)
 
 
+def contains_secondary_term(text: str) -> bool:
+    """True if the text contains any secondary LIMS term.
+
+    Used with :func:`contains_primary_term` to prioritize which swept notices
+    get their description fetched first when the fetch budget is limited.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    return any(pattern.search(low) for _, pattern in _SECONDARY_PATTERNS)
+
+
 def score_opportunity(
     *,
     title: str,
     description: str,
     naics_codes: list[str] | None = None,
+    psc_code: str | None = None,
 ) -> RelevanceResult:
     """Score a single opportunity for LIMS relevance from its real text."""
     title_l = (title or "").lower()
@@ -137,7 +150,10 @@ def score_opportunity(
 
     score += min(len(secondary_all) * _SECONDARY, _SECONDARY_CAP)
 
-    if matched_naics:
+    # A LIMS-typical NAICS or PSC adds one code-confidence boost (not stacked:
+    # codes corroborate, they don't independently accumulate).
+    psc_match = bool(psc_code and psc_code in config.LIMS_RELEVANT_PSC)
+    if matched_naics or psc_match:
         score += _NAICS_MATCH
 
     score = min(score, _MAX_SCORE)

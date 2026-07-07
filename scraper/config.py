@@ -119,8 +119,10 @@ MIN_RELEVANCE_SCORE = 65
 LIMS_CORE_PRIMARY_TERMS = (
     "laboratory information management system",
     "laboratory information management systems",
+    "laboratory information management",
     "laboratory information system",
     "laboratory informatics",
+    "lab informatics",
     "lims",
     "electronic laboratory notebook",
     "laboratory data management",
@@ -132,6 +134,8 @@ LIMS_CONTEXTUAL_PRIMARY_TERMS = (
     "specimen management",
     "sample tracking",
     "sample management system",
+    "laboratory software",
+    "laboratory automation",
 )
 
 # Words indicating a software/system procurement (vs physical logistics).
@@ -179,10 +183,45 @@ SAM_SEARCH_QUERIES = (
     "LIMS",
     "laboratory information",
     "laboratory informatics",
+    "lab informatics",
+    "laboratory software",
     "electronic laboratory notebook",
     "specimen tracking",
     "specimen management",
 )
+
+# NAICS codes to SWEEP (fetch everything filed under them in the window and
+# let scoring decide). These are the codes agencies actually use for LIMS
+# consulting/integration work. Override with a comma-separated NAICS_SWEEP env
+# var; set it to "off" to disable sweeps entirely.
+SAM_NAICS_SWEEP = (
+    "541512",  # Computer Systems Design Services (primary)
+    "541511",  # Custom Computer Programming Services
+    "541690",  # Other Scientific and Technical Consulting Services
+    "541611",  # Admin/General Management Consulting Services
+    "541519",  # Other Computer Related Services
+)
+
+# Product Service Codes (classification codes) to sweep, same mechanics.
+# Override with PSC_SWEEP env var ("off" to disable).
+SAM_PSC_SWEEP = (
+    "DA01",  # IT and Telecom - Business Application Support Services
+    "DJ01",  # IT and Telecom - Security and Compliance Support Services
+    "DB02",  # IT and Telecom - Compute Support Services
+    "R425",  # Support Professional: Engineering and Technical
+    "R408",  # Support Professional: Program Management/Support
+    "R499",  # Support Professional: Other
+)
+
+
+def sweep_list(env_name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """A sweep code list, overridable per env ("off"/"none" disables)."""
+    raw = get(env_name)
+    if raw is None:
+        return default
+    if raw.strip().lower() in ("off", "none", "0", "false"):
+        return ()
+    return tuple(code.strip() for code in raw.split(",") if code.strip())
 
 # NAICS codes commonly associated with LIMS procurements. A match adds a small
 # amount of confidence; it never qualifies a notice by itself.
@@ -199,7 +238,15 @@ LIMS_RELEVANT_NAICS = frozenset(
         "541714",  # R&D in Biotechnology
         "511210",  # Software Publishers (2017 NAICS -- standard for COTS buys)
         "513210",  # Software Publishers (2022 NAICS vintage)
+        "541611",  # Admin/Management Consulting (workflow analysis, advisory)
+        "541690",  # Other Scientific and Technical Consulting Services
     }
+)
+
+# PSCs typical of LIMS-adjacent buys; a match adds the same small confidence
+# boost as a NAICS match (never qualifies a notice by itself).
+LIMS_RELEVANT_PSC = frozenset(
+    {"DA01", "DJ01", "DB02", "R425", "R408", "R499", "7A20", "7J20"}
 )
 
 # Status written to new rows (matches the table default of 'new').

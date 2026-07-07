@@ -131,11 +131,16 @@ class _Handler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
 
         if url.path == "/opportunities/v2/search":
-            # Contract checks: title (not q), MM/DD/YYYY window, api_key.
+            # Contract checks: title/ncode/ccode (never q), MM/DD/YYYY, api_key.
             assert "q" not in qs, "v2 API has no q param"
-            assert "title" in qs and "api_key" in qs
+            assert "api_key" in qs
             assert re.match(r"\d{2}/\d{2}/\d{4}$", qs["postedFrom"][0])
-            return self._json(_sam_payload(self.base))
+            filters = [f for f in ("title", "ncode", "ccode") if f in qs]
+            assert len(filters) == 1, f"expected exactly one filter, got {filters}"
+            if filters[0] == "title":
+                return self._json(_sam_payload(self.base))
+            # Sweeps return an empty window in the stub.
+            return self._json({"totalRecords": 0, "opportunitiesData": []})
 
         if url.path == "/noticedesc":
             nid = qs.get("noticeid", [""])[0]

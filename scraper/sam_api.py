@@ -54,6 +54,7 @@ class SamOpportunity:
     response_deadline: str | None       # ISO 8601 timestamp or None
     sam_link: str | None
     naics_codes: list[str] = field(default_factory=list)
+    psc_code: str | None = None         # classification (Product Service) code
     set_aside: str | None = None
     value: float | None = None
     poc_name: str | None = None
@@ -165,20 +166,31 @@ class SamClient:
         raise SamApiError(f"SAM.gov request failed after retries: {last_exc}")
 
     # -- public API --------------------------------------------------------
+    # Filter fields the v2 API supports for our searches. NOTE: there is NO
+    # free-text ``q`` parameter -- keyword search is ``title`` (substring match
+    # on the notice title); ``ncode`` filters by NAICS; ``ccode`` filters by
+    # classification (PSC) code. Descriptions still get matched by scoring.py
+    # after the per-notice description fetch.
+    SEARCH_FIELDS = ("title", "ncode", "ccode")
+
     @staticmethod
     def _search_params(
-        query: str, posted_from: date, posted_to: date, limit: int, offset: int
+        query: str,
+        posted_from: date,
+        posted_to: date,
+        limit: int,
+        offset: int,
+        *,
+        field: str = "title",
     ) -> dict[str, Any]:
         """Build query params for one search page.
 
-        NOTE: the public Opportunities v2 API has NO free-text ``q`` parameter --
-        keyword search is done via ``title`` (substring match against the notice
-        title). Descriptions still get matched later by scoring.py after the
-        per-notice description fetch. postedFrom/postedTo are REQUIRED by the
-        API and must be MM/dd/yyyy.
+        postedFrom/postedTo are REQUIRED by the API and must be MM/dd/yyyy.
         """
+        if field not in SamClient.SEARCH_FIELDS:
+            raise SamApiError(f"unsupported search field {field!r}")
         return {
-            "title": query,
+            field: query,
             "postedFrom": posted_from.strftime("%m/%d/%Y"),
             "postedTo": posted_to.strftime("%m/%d/%Y"),
             "limit": limit,
@@ -193,19 +205,24 @@ class SamClient:
         posted_to: date,
         limit: int = config.SAM_PAGE_LIMIT,
         max_pages: int = 5,
+        field: str = "title",
     ) -> list[dict[str, Any]]:
-        """Return raw ``opportunitiesData`` dicts for one title-keyword query.
+        """Return raw ``opportunitiesData`` dicts for one search filter.
 
-        Paginates until results are exhausted or ``max_pages`` is reached; if
-        the API reports more records than we fetched, that is surfaced on
-        stdout so silent truncation can't masquerade as full coverage.
+        ``field`` selects the filter: "title" (keyword), "ncode" (NAICS sweep),
+        or "ccode" (PSC sweep). Paginates until results are exhausted or
+        ``max_pages`` is reached; if the API reports more records than we
+        fetched, that is surfaced on stdout so silent truncation can't
+        masquerade as full coverage.
         """
         results: list[dict[str, Any]] = []
         offset = 0
         total = 0
         for _ in range(max_pages):
             params = {"api_key": self.api_key}
-            params.update(self._search_params(query, posted_from, posted_to, limit, offset))
+            params.update(
+                self._search_params(query, posted_from, posted_to, limit, offset, field=field)
+            )
             resp = self._get(config.SAM_SEARCH_URL, params)
             try:
                 payload = resp.json()
@@ -310,6 +327,7 @@ class SamClient:
             response_deadline=_first_present(raw, "responseDeadLine", "responseDeadline"),
             sam_link=_first_present(raw, "uiLink", "link"),
             naics_codes=naics,
+            psc_code=(str(raw["classificationCode"]) if raw.get("classificationCode") else None),
             set_aside=_first_present(raw, "typeOfSetAsideDescription", "typeOfSetAside"),
             value=value,
             poc_name=poc_name,
