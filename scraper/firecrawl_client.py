@@ -57,12 +57,18 @@ def extract_listing_links(
         return []
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
+    base_clean = base_url.split("#", 1)[0].rstrip("/")
     for match in _MD_LINK_RE.finditer(markdown):
         anchor = " ".join(match.group(1).split())
         href = match.group(2)
-        url = urljoin(base_url, href)
-        if url in seen or url.rstrip("/") == base_url.rstrip("/"):
+        # Fragments are client-side only: "#tab-8" on a search page is the
+        # same page, not a listing. Compare and store URLs without them.
+        url = urljoin(base_url, href).split("#", 1)[0]
+        if not url or url in seen or url.rstrip("/") == base_clean:
             continue
+        # A LIMS signal must come from the link itself (real anchor text or
+        # its own path/query) -- note relative hrefs resolved against a
+        # ?q=LIMS base keep that query only when the href had none of its own.
         if scoring.contains_primary_term(anchor) or _URL_LIMS_RE.search(url):
             seen.add(url)
             out.append((anchor, url))
