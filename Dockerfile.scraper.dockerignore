@@ -1,0 +1,17 @@
+# Keep the scraper image lean — exclude the Next.js app and local artifacts.
+node_modules
+.next
+out
+build
+.git
+.env
+.env.*
+*.pyc
+__pycache__
+app
+components
+lib
+supabase
+public
+*.md
+!scraper/README.md
