@@ -131,6 +131,32 @@ class ColumnMapContract(unittest.TestCase):
         self.assertNotIn("bogus", row)                 # unknown keys dropped
 
 
+class PortalRotation(unittest.TestCase):
+    def test_never_checked_first_then_oldest(self):
+        from scraper.run import _is_search_url
+        from scraper.firecrawl_client import _portal_target_url
+        portals = [
+            {"name": "Checked yesterday", "portal_url": "https://a.gov", "last_checked": "2026-07-07T11:00:00Z"},
+            {"name": "Never checked", "portal_url": "https://b.gov", "last_checked": None},
+            {"name": "Checked last week", "portal_url": "https://c.gov", "last_checked": "2026-07-01T11:00:00Z"},
+            {"name": "Also never, search URL", "portal_url": "https://d.gov/search?q=LIMS", "last_checked": None},
+        ]
+        portals.sort(
+            key=lambda p: (
+                0 if not p.get("last_checked") else 1,
+                p.get("last_checked") or "",
+                0 if _is_search_url(_portal_target_url(p)) else 1,
+                p.get("name") or "",
+            )
+        )
+        names = [p["name"] for p in portals]
+        # Never-checked first (search-style URL breaking the tie), then oldest.
+        self.assertEqual(
+            names,
+            ["Also never, search URL", "Never checked", "Checked last week", "Checked yesterday"],
+        )
+
+
 class PortalUrlSelection(unittest.TestCase):
     def test_prefers_search_url_then_portal_url(self):
         self.assertEqual(_portal_target_url({"portal_url": "https://p.gov"}), "https://p.gov")

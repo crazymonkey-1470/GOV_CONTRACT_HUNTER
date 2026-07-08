@@ -465,12 +465,20 @@ def run_firecrawl(*, limit: int = 1, dry_run: bool = False, listings_per_portal:
         fc.close()
         return stats
 
-    # Prefer a non-SAM portal per Step 6, and among those prefer a portal whose
-    # target URL is already a keyword *search* (e.g. HigherGov's ?q=LIMS) over a
-    # bare landing page -- a search page is far more likely to yield extractable
-    # LIMS listings. Ordering only; nothing is invented.
+    # Rotate through every active non-SAM portal: never-checked portals first,
+    # then the least recently checked (last_checked is updated on each scrape,
+    # so with N portals and PORTAL_LIMIT per run the whole list cycles every
+    # N/PORTAL_LIMIT days). Ties prefer search-style URLs (e.g. ?q=LIMS) over
+    # bare landing pages. Ordering only; nothing is invented.
     non_sam = [p for p in portals if "sam.gov" not in (p.get("portal_url") or "").lower()]
-    non_sam.sort(key=lambda p: (0 if _is_search_url(_portal_target_url(p)) else 1, p.get("name") or ""))
+    non_sam.sort(
+        key=lambda p: (
+            0 if not p.get("last_checked") else 1,
+            p.get("last_checked") or "",
+            0 if _is_search_url(_portal_target_url(p)) else 1,
+            p.get("name") or "",
+        )
+    )
     chosen = non_sam[:limit] or portals[:limit]
 
     qualifying: list[dict] = []
