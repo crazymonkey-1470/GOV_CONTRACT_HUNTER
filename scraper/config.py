@@ -101,6 +101,17 @@ def lookback_days() -> int:
     return get_int("LOOKBACK_DAYS", DEFAULT_LOOKBACK_DAYS)
 
 
+def sam_daily_quota() -> int:
+    """The key's daily request allowance, if the user has told us (0 = plenty).
+
+    Set SAM_DAILY_QUOTA=10 for a personal non-federal key so the run splits
+    the budget between a few high-value searches and description fetches
+    instead of burning everything on searches. Entity-associated keys
+    (~1,000/day) can leave this unset.
+    """
+    return get_int("SAM_DAILY_QUOTA", 0)
+
+
 # ---------------------------------------------------------------------------
 # LIMS relevance model
 # ---------------------------------------------------------------------------

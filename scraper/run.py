@@ -133,6 +133,32 @@ def run_sam(*, dry_run: bool) -> RunStats:
     return stats
 
 
+def _build_search_plan() -> list[tuple[str, str]]:
+    """The (field, value) filters one run sends to SAM, highest value first.
+
+    Default order: title keywords (most precise), then NAICS sweeps, then PSC
+    sweeps. When a small SAM_DAILY_QUOTA is declared, the order interleaves so
+    the few searches that fit the allowance are the highest-yield ones: the
+    'LIMS' title query, then the primary 541512 sweep, then alternating
+    sweeps/titles.
+    """
+    titles = [("title", q) for q in config.SAM_SEARCH_QUERIES]
+    naics = [("ncode", c) for c in config.sweep_list("NAICS_SWEEP", config.SAM_NAICS_SWEEP)]
+    pscs = [("ccode", c) for c in config.sweep_list("PSC_SWEEP", config.SAM_PSC_SWEEP)]
+
+    if not config.sam_daily_quota():
+        return titles + naics + pscs
+
+    # Small-quota interleave: precision first, then recall-per-request.
+    plan: list[tuple[str, str]] = []
+    if titles:
+        plan.append(titles[0])  # 'LIMS'
+    plan.extend(naics)          # sweeps yield the most candidates per request
+    plan.extend(titles[1:])
+    plan.extend(pscs)
+    return plan
+
+
 def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
     stats = RunStats()
 
@@ -147,19 +173,30 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
     use_llm = enrichment.is_available()
     print(f"[sam] lookback window: {lookback} days   LLM enrichment: {'on' if use_llm else 'off'}")
 
-    # Search plan, most-precise first so a small quota is spent on the
-    # highest-value requests: title keywords, then NAICS sweeps, then PSC
-    # sweeps. Sweeps cast a wide net on purpose -- the relevance gate (not the
-    # search) decides what qualifies.
-    search_plan: list[tuple[str, str]] = [("title", q) for q in config.SAM_SEARCH_QUERIES]
-    search_plan += [("ncode", c) for c in config.sweep_list("NAICS_SWEEP", config.SAM_NAICS_SWEEP)]
-    search_plan += [("ccode", c) for c in config.sweep_list("PSC_SWEEP", config.SAM_PSC_SWEEP)]
+    search_plan = _build_search_plan()
+    daily_quota = config.sam_daily_quota()
+    # On a known-small quota, spend roughly 40% on searches and reserve the
+    # rest for description fetches -- otherwise searches eat the whole
+    # allowance and nothing can ever be verified deeply enough to insert.
+    search_allowance = max(2, (daily_quota * 2) // 5) if daily_quota else None
+    if search_allowance is not None:
+        print(
+            f"[sam] small-quota mode: {daily_quota} requests/day -> "
+            f"{search_allowance} for searches, rest reserved for descriptions"
+        )
 
     raw_by_id: dict[str, dict] = {}
     with SamClient(sam_key) as sam:
         posted_from, posted_to = default_window(lookback)
         print(f"[sam] searching {posted_from} .. {posted_to}  ({len(search_plan)} filters)")
         for field, query in search_plan:
+            if search_allowance is not None and sam.requests_made >= search_allowance:
+                stats.warnings.append(
+                    f"search allowance ({search_allowance} of {daily_quota}) reached; "
+                    f"remaining filters skipped to reserve quota for description fetches"
+                )
+                print("[sam] search allowance reached -- reserving quota for descriptions")
+                break
             try:
                 batch = sam.search(
                     query=query, posted_from=posted_from, posted_to=posted_to, field=field
@@ -232,7 +269,12 @@ def _run_sam_window(*, dry_run: bool, lookback: int) -> RunStats:
         for nid in new_ids:
             rec = raw_by_id[nid]
             wants_fetch = bool(rec.get("description"))
-            do_fetch = wants_fetch and fetch_budget > 0 and not sam.quota_exhausted
+            do_fetch = (
+                wants_fetch
+                and fetch_budget > 0
+                and not sam.quota_exhausted
+                and (not daily_quota or sam.requests_made < daily_quota)
+            )
             try:
                 opp = sam.normalize(rec, with_description=do_fetch)
             except SamApiError as exc:

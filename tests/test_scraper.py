@@ -404,6 +404,34 @@ class SupabaseUrlNormalization(unittest.TestCase):
             client.close()
 
 
+class SmallQuotaMode(unittest.TestCase):
+    def test_default_plan_titles_first(self):
+        from scraper.run import _build_search_plan
+        plan = _build_search_plan()
+        self.assertEqual(plan[0], ("title", "LIMS"))
+        # All titles precede all sweeps in the default plan.
+        kinds = [f for f, _ in plan]
+        self.assertEqual(kinds.index("ncode"), len(config.SAM_SEARCH_QUERIES))
+
+    def test_small_quota_plan_prioritizes_primary_sweep(self):
+        import os
+        from scraper.run import _build_search_plan
+        os.environ["SAM_DAILY_QUOTA"] = "10"
+        try:
+            plan = _build_search_plan()
+        finally:
+            del os.environ["SAM_DAILY_QUOTA"]
+        # 'LIMS' title first, then the 541512 sweep -- the two highest-yield
+        # requests fit even the smallest allowance.
+        self.assertEqual(plan[0], ("title", "LIMS"))
+        self.assertEqual(plan[1], ("ncode", "541512"))
+
+    def test_allowance_split(self):
+        # ~40% of the declared quota goes to searches, minimum 2.
+        for quota, expected in ((10, 4), (25, 10), (5, 2), (3, 2)):
+            self.assertEqual(max(2, (quota * 2) // 5), expected)
+
+
 class InsertAttribution(unittest.TestCase):
     """_record_insert_outcome must attribute inserts from the representation."""
 

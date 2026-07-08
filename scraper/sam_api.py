@@ -105,6 +105,10 @@ class SamClient:
         # (searches, description fetches) short-circuit instead of burning
         # requests against a dead quota.
         self.quota_exhausted = False
+        # Requests attempted this run (every HTTP attempt counts against the
+        # key's daily allowance). Used to split a small quota between
+        # searches and description fetches.
+        self.requests_made = 0
         self._client = httpx.Client(
             timeout=timeout or config.HTTP_TIMEOUT_SECONDS,
             headers={"Accept": "application/json"},
@@ -127,6 +131,7 @@ class SamClient:
         last_exc: Exception | None = None
         backoff = 2.0
         for attempt in range(1, config.HTTP_MAX_RETRIES + 1):
+            self.requests_made += 1
             try:
                 resp = self._client.get(url, params=params)
             except httpx.HTTPError as exc:  # network-level failure
