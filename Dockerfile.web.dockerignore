@@ -1,0 +1,14 @@
+# Keep the web image build context lean — exclude the scraper and artifacts.
+node_modules
+.next
+out
+build
+.git
+.env
+.env.*
+scraper
+tests
+__pycache__
+*.pyc
+Dockerfile.scraper
+Dockerfile.scraper.dockerignore

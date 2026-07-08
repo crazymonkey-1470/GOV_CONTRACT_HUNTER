@@ -1,0 +1,24 @@
+# ContractHunter dashboard (Next.js) — Railway image.
+# The repo root also contains the Python scraper (Dockerfile.scraper); this
+# image builds only the web app.
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+# NEXT_PUBLIC_* variables are inlined at build time — set them on the Railway
+# service BEFORE deploying: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY.
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN npm run build
+
+# Railway injects PORT; next start must bind to it.
+CMD ["sh", "-c", "npm run start -- -p ${PORT:-3000} -H 0.0.0.0"]
