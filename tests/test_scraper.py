@@ -403,6 +403,96 @@ class QuotaExhaustion(unittest.TestCase):
         self.assertEqual(calls["n"], 3)
 
 
+class WideningRespectsDailyQuota(unittest.TestCase):
+    """Regression: a spent daily quota must stop the lookback auto-widen.
+
+    run_sam used to create a fresh SamClient per widened window, resetting the
+    request counter -- so after the narrow window had (by design) spent the
+    whole SAM_DAILY_QUOTA on searches + description fetches, the widened pass
+    fired real searches into an exhausted quota and failed with a 429 every
+    single day.
+    """
+
+    QUOTA_BODY = QuotaExhaustion.QUOTA_BODY
+
+    def _run_with_stub(self, handler, quota="10"):
+        import os
+        import httpx
+        from scraper import run as run_mod
+        from scraper.sam_api import SamClient
+
+        class StubbedSam(SamClient):
+            def __init__(self, api_key, **kwargs):
+                super().__init__(api_key)
+                self._client = httpx.Client(transport=httpx.MockTransport(handler))
+
+        env = {"SAM_API_KEY": "test-sam-key", "SAM_DAILY_QUOTA": quota,
+               "LOOKBACK_DAYS": "14"}
+        saved = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        real_client = run_mod.SamClient
+        run_mod.SamClient = StubbedSam
+        try:
+            return run_mod.run_sam(dry_run=True)
+        finally:
+            run_mod.SamClient = real_client
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_widening_skipped_when_quota_spent(self):
+        import httpx
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] > 10:  # the key's real daily allowance
+                return httpx.Response(429, json=self.QUOTA_BODY)
+            if request.url.path.endswith("/search"):
+                data = [
+                    {
+                        "noticeId": f"stub-{calls['n']}-{i}",
+                        "title": "Road Paving Services",
+                        "postedDate": "2026-07-01",
+                        "description": "https://api.sam.gov/noticedesc?id=x",
+                    }
+                    for i in range(30)
+                ]
+                return httpx.Response(
+                    200, json={"totalRecords": 30, "opportunitiesData": data}
+                )
+            return httpx.Response(200, json={"description": "asphalt and paving"})
+
+        stats = self._run_with_stub(handler)
+        # 4 searches + 6 description fetches spend the quota; the widened pass
+        # must never fire (it used to 429 here every day).
+        self.assertEqual(stats.errors, [])
+        self.assertEqual(calls["n"], 10)
+        self.assertEqual(stats.fetched, 120)  # narrow window's work is kept
+        self.assertTrue(any("widening skipped" in w for w in stats.warnings),
+                        stats.warnings)
+
+    def test_widening_continues_while_budget_remains(self):
+        import httpx
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] > 10:
+                return httpx.Response(429, json=self.QUOTA_BODY)
+            return httpx.Response(200, json={"totalRecords": 0, "opportunitiesData": []})
+
+        stats = self._run_with_stub(handler)
+        # Empty windows leave the description budget unspent, so widening can
+        # keep searching -- but never past the 10-request allowance.
+        self.assertEqual(stats.errors, [])
+        self.assertLessEqual(calls["n"], 10)
+        self.assertTrue(any("auto-widened" in w for w in stats.warnings),
+                        stats.warnings)
+
+
 class SupabaseUrlNormalization(unittest.TestCase):
     def test_rest_v1_suffix_not_doubled(self):
         from scraper.db import SupabaseClient
