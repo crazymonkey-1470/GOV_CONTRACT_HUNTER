@@ -2,8 +2,8 @@
 -- ContractHunter — full setup for a FRESH Supabase project (one paste, one run).
 --
 -- Combines migrations 001 + 003 + 004 (sample data from 002 is left out) and
--- adds the optional sourcing_portals.search_url column the scraper already
--- prefers when present. Idempotent: safe to re-run.
+-- makes notice_id required, since it is the dedup key bots upsert on.
+-- Idempotent: safe to re-run. Bot write contract: docs/BOTS.md.
 --
 -- Run in: Supabase Dashboard -> SQL Editor -> New query -> Run.
 -- ============================================================================
@@ -109,11 +109,6 @@ values
    array['procurement','data','awards'], true)
 on conflict (portal_url) do nothing;
 
--- Optional pre-built keyword search per portal; the Firecrawl scraper scrapes
--- this instead of portal_url when it is set.
-alter table public.sourcing_portals
-  add column if not exists search_url text;
-
 -- Known-good LIMS search (was in the old database).
 insert into public.sourcing_portals (name, state, portal_type, portal_url, notes, search_keywords, is_active)
 values
@@ -121,3 +116,8 @@ values
    'Pre-built LIMS opportunity search across federal/state/local.',
    array['LIMS','laboratory information management'], true)
 on conflict (portal_url) do nothing;
+
+-- Rows without notice_id would never conflict, so repeat finds would pile up
+-- as duplicates. Require it.
+alter table public.contract_opportunities
+  alter column notice_id set not null;

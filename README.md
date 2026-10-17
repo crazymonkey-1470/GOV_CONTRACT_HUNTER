@@ -34,7 +34,7 @@ and **Supabase** (Postgres + Auth).
 | Styling   | Tailwind CSS + shadcn/ui                       |
 | Data/Auth | Supabase (`@supabase/ssr`)                     |
 | Dates     | date-fns                                       |
-| Hosting   | Vercel                                         |
+| Hosting   | Railway (`Dockerfile.web`)                     |
 
 ---
 
@@ -42,7 +42,7 @@ and **Supabase** (Postgres + Auth).
 
 - **Node.js 18.18+** (Node 20+ recommended) and npm.
 - A **Supabase project** with the `contract_opportunities` table (see schema
-  below). It is normally populated by your upstream AI agent.
+  below). It is populated by your AI bots — see [`docs/BOTS.md`](docs/BOTS.md).
 
 ---
 
@@ -74,26 +74,20 @@ Visit **http://localhost:3000** — you'll be redirected to `/login`.
 
 ---
 
-## 3. Database setup (indexes + Row Level Security)
+## 3. Database setup
 
-The table already exists, but you should apply the recommended indexes and
-security policy. In **Supabase Dashboard → SQL Editor**, paste and run
-[`supabase/migrations/001_initial.sql`](supabase/migrations/001_initial.sql).
+In **Supabase Dashboard → SQL Editor**, paste and run
+[`supabase/full_setup.sql`](supabase/full_setup.sql). It is idempotent and
+creates everything the dashboard reads:
 
-It is idempotent and safe to run against your existing project. It:
+- `contract_opportunities` (the contracts) and `sourcing_portals` (the Helpful
+  Links page), with indexes,
+- **Row Level Security** so only a signed-in user can read rows,
+- a starter set of portals.
 
-- creates the table only if it's missing (reference schema),
-- adds indexes on `relevance_score`, `response_deadline`, and `status`,
-- enables **Row Level Security** and adds a policy so only a signed-in user can
-  read rows. (Your agent should write rows using the **service-role** key,
-  which bypasses RLS.)
-
-### Expected table: `contract_opportunities`
-
-`id`, `notice_id`, `title`, `agency`, `value`, `posted_date`,
-`response_deadline`, `sam_link`, `relevance_score`, `summary`, `keywords`,
-`naics_codes`, `set_aside`, `customer_fit_notes`, `raw_data`, `status`,
-`created_at`.
+Nothing in this repo writes data. Your bots insert rows with the
+**service-role** key, which bypasses RLS. The exact write contract (columns,
+dedup key, example request) is in [`docs/BOTS.md`](docs/BOTS.md).
 
 ---
 
@@ -116,17 +110,19 @@ the same Users panel.
 
 ---
 
-## 5. Deploy to Vercel
+## 5. Deploy to Railway
 
-1. Push this repo to GitHub.
-2. In **Vercel → Add New → Project**, import the repository.
-3. Add the two environment variables (same as `.env.local`):
+1. New service → Deploy from GitHub repo → this repository.
+2. Settings → **Config-as-code file: `railway.web.json`** (builds `Dockerfile.web`).
+3. Variables:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Click **Deploy**. Vercel auto-detects Next.js — no extra config needed.
 
-After deploying, add your Vercel production URL to **Supabase → Authentication →
-URL Configuration** (Site URL / Redirect URLs) for the cleanest auth behavior.
+   These are inlined at **build** time, so redeploy after changing them.
+4. Settings → Networking → generate a domain or attach your custom domain.
+
+After deploying, add the site URL to **Supabase → Authentication → URL
+Configuration** (Site URL / Redirect URLs).
 
 ---
 
@@ -173,7 +169,9 @@ lib/
   format.ts               Currency / date / "days left" helpers
   utils.ts                cn() class helper
 middleware.ts             Auth middleware
-supabase/migrations/      SQL: indexes + RLS
+supabase/full_setup.sql   SQL: one-shot schema + RLS for a fresh project
+supabase/migrations/      SQL: the same, as incremental steps
+docs/BOTS.md              How bots write contracts into the database
 ```
 
 ---

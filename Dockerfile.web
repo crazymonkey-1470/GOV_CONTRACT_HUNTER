@@ -1,6 +1,4 @@
 # ContractHunter dashboard (Next.js) — Railway image.
-# The repo root also contains the Python scraper (Dockerfile.scraper); this
-# image builds only the web app.
 FROM node:20-alpine
 
 WORKDIR /app

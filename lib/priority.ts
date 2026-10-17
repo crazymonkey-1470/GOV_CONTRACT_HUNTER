@@ -4,9 +4,8 @@ import type { Opportunity } from "@/lib/types";
 /**
  * Target classification codes for LIMS specialty consulting work.
  *
- * Mirrors the scraper's sweep configuration (scraper/config.py): the codes
- * agencies actually file LIMS consulting, integration, and support work under.
- * The dashboard uses these to badge, filter, and tie-break-sort opportunities.
+ * The codes agencies actually file LIMS consulting, integration, and support
+ * work under. The dashboard uses these to badge, filter, and tie-break-sort opportunities.
  */
 export const PRIMARY_NAICS = "541512"; // Computer Systems Design Services
 
@@ -29,7 +28,7 @@ export const TARGET_PSC = new Set([
 
 /**
  * Product Service Code of an opportunity, if the row carries one.
- * Scraper rows keep the full SAM payload under raw_data.sam.
+ * Read from raw_data.sam.classificationCode or raw_data.classificationCode.
  */
 export function pscOf(opportunity: Opportunity): string | null {
   const raw = opportunity.raw_data;
