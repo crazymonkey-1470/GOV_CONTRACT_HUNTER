@@ -1,0 +1,21 @@
+// Cloudflare Workers config for the ContractHunter dashboard (Next.js via OpenNext).
+// "name" must match the Worker in the Cloudflare dashboard (gov-contract-hunter).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gov-contract-hunter",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // `wrangler deploy` (Cloudflare's default deploy command) runs this first, so the
+  // Worker builds correctly whatever build command the dashboard is set to.
+  "build": {
+    "command": "npx opennextjs-cloudflare build"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -116,17 +116,31 @@ the same Users panel.
 
 ---
 
-## 5. Deploy to Vercel
+## 5. Deploy to Cloudflare Workers
 
-1. Push this repo to GitHub.
-2. In **Vercel → Add New → Project**, import the repository.
-3. Add the two environment variables (same as `.env.local`):
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Click **Deploy**. Vercel auto-detects Next.js — no extra config needed.
+The dashboard runs on Cloudflare Workers through the OpenNext adapter
+(`@opennextjs/cloudflare`). The Worker is `gov-contract-hunter` (see `wrangler.jsonc`)
+and is served at quant-agents.org.
 
-After deploying, add your Vercel production URL to **Supabase → Authentication →
-URL Configuration** (Site URL / Redirect URLs) for the cleanest auth behavior.
+- **Automatic:** Cloudflare Workers Builds deploys every push to the production
+  branch. The default deploy command (`npx wrangler deploy`) runs the OpenNext build
+  first (`build.command` in `wrangler.jsonc`), so no build settings are needed.
+- **Manual:** `npm run cf:deploy` (needs `wrangler login`).
+- **Local Workers runtime:** `npm run cf:preview`, then open http://localhost:8787.
+- **Supabase settings** are public values in `.env.production`, inlined at build time.
+  Host environment variables override them. Never put a secret key there.
+- No R2 bucket or other bindings are needed: every page renders per request.
+
+## 6. Discovery agents → `agent-ingest` endpoint
+
+Agents never hold a database key. They POST opportunities to the Supabase Edge
+Function in `supabase/functions/agent-ingest` with an `x-agent-key` header.
+It is insert-only (an existing `notice_id` is skipped), validates every row, and
+records the sending agent in `raw_data._ingest`. `GET` with a valid key returns the
+field reference; `?dry_run=1` validates without writing.
+
+To add or revoke an agent, edit `AGENT_KEYS` (SHA-256 hashes of the keys) and redeploy:
+`supabase functions deploy agent-ingest --no-verify-jwt`.
 
 ---
 
@@ -138,6 +152,9 @@ URL Configuration** (Site URL / Redirect URLs) for the cleanest auth behavior.
 | `npm run build` | Production build                     |
 | `npm run start` | Run the production build locally     |
 | `npm run lint`  | Lint the project                     |
+| `npm run cf:build`   | Build for Cloudflare Workers (OpenNext) |
+| `npm run cf:preview` | Run the Worker locally (workerd)        |
+| `npm run cf:deploy`  | Build and deploy to Cloudflare          |
 
 ---
 
