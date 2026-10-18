@@ -12,6 +12,7 @@ import {
   SearchX,
   Sprout,
   Target,
+  X,
 } from "lucide-react";
 
 import { SectionHeading, pill } from "@/components/bubbly";
@@ -29,6 +30,15 @@ import type { Opportunity } from "@/lib/types";
 type Status = "active" | "closed";
 type SortKey = "match" | "deadline" | "recent";
 type ViewMode = "cards" | "table";
+/** Stat-bubble filters: each shows exactly what its bubble counts. */
+type Bubble = "closing" | "strong";
+
+const BUBBLE_LABELS: Record<Bubble, string> = {
+  closing: "Closing this week",
+  strong: "Strong matches 80+",
+};
+
+const STRONG_MATCH = 80;
 
 const SORT_KEYS: SortKey[] = ["match", "deadline", "recent"];
 
@@ -93,9 +103,11 @@ export function DashboardView({
   const [savedOnly, setSavedOnly] = useState(false);
   const [priorityOnly, setPriorityOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("match");
+  const [bubble, setBubble] = useState<Bubble | null>(null);
   const [view, setView] = useState<ViewMode>("cards");
   const [openId, setOpenId] = useState<string | null>(null);
   const resultsRef = useRef<HTMLElement>(null);
+  const allChipRef = useRef<HTMLButtonElement>(null);
 
   // Re-evaluate "closed" periodically so the split and counts stay fresh.
   const [now, setNow] = useState(() => Date.now());
@@ -141,23 +153,30 @@ export function DashboardView({
     setSetAside("all");
     setPriorityOnly(false);
     setSavedFilter(false);
+    setBubble(null);
   }, [setSavedFilter]);
 
-  const { activeAll, closedAll, closingSoon } = useMemo(() => {
+  /** Switching tabs drops a bubble filter (they only apply to open opportunities). */
+  const changeStatus = useCallback((next: Status) => {
+    setStatus(next);
+    setBubble(null);
+  }, []);
+
+  const { activeAll, closedAll, closingSoonIds } = useMemo(() => {
     const reference = new Date(now);
     const active: Opportunity[] = [];
     const closed: Opportunity[] = [];
-    let soon = 0;
+    const soon = new Set<string>();
     for (const opportunity of opportunities) {
       const life = lifecycleOf(opportunity, reference);
       if (life.closed) {
         closed.push(opportunity);
       } else {
         active.push(opportunity);
-        if (life.deadline.status === "soon") soon += 1;
+        if (life.deadline.status === "soon") soon.add(opportunity.id);
       }
     }
-    return { activeAll: active, closedAll: closed, closingSoon: soon };
+    return { activeAll: active, closedAll: closed, closingSoonIds: soon };
   }, [opportunities, now]);
 
   // Saved ids can outlive their rows (deleted, or now below the score cutoff), so count loaded ones.
@@ -167,8 +186,15 @@ export function DashboardView({
   );
 
   const strongMatches = useMemo(
-    () => activeAll.filter((o) => scoreOf(o) >= 80).length,
+    () => activeAll.filter((o) => scoreOf(o) >= STRONG_MATCH).length,
     [activeAll],
+  );
+
+  /** The same rules the bubble counts use, so a bubble shows exactly its number. */
+  const inBubble = useCallback(
+    (o: Opportunity, which: Bubble) =>
+      which === "closing" ? closingSoonIds.has(o.id) : scoreOf(o) >= STRONG_MATCH,
+    [closingSoonIds],
   );
 
   const setAsideOptions = useMemo(() => {
@@ -188,6 +214,7 @@ export function DashboardView({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = tabAll.filter((o) => {
+      if (bubble && !inBubble(o, bubble)) return false;
       if (setAside !== "all" && o.set_aside !== setAside) return false;
       if (savedOnly && !isSaved(o.id)) return false;
       if (priorityOnly && codePriority(o) === null) return false;
@@ -223,20 +250,28 @@ export function DashboardView({
       sorted.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
     }
     return sorted;
-  }, [tabAll, status, setAside, savedOnly, priorityOnly, query, sort, isSaved, searchIndex]);
+  }, [tabAll, status, bubble, inBubble, setAside, savedOnly, priorityOnly, query, sort, isSaved, searchIndex]);
 
   const openOpportunity = openId
     ? (opportunities.find((o) => o.id === openId) ?? null)
     : null;
 
   const filtersActive =
-    query.trim() !== "" || setAside !== "all" || savedOnly || priorityOnly;
+    query.trim() !== "" || setAside !== "all" || savedOnly || priorityOnly || bubble !== null;
 
-  /** Stat bubbles jump to the full list they summarize. */
-  const jumpTo = (nextStatus: Status, nextSort?: SortKey) => {
+  /** Open / Closed bubbles jump to that whole tab. */
+  const jumpTo = (nextStatus: Status) => {
     clearFilters();
     setStatus(nextStatus);
-    if (nextSort) setSort(nextSort);
+    showResults();
+  };
+
+  /** Closing / Strong bubbles show only what they count (clearing search and other filters). */
+  const showBubble = (which: Bubble, nextSort: SortKey) => {
+    clearFilters();
+    setStatus("active");
+    setSort(nextSort);
+    setBubble(which);
     showResults();
   };
 
@@ -260,8 +295,18 @@ export function DashboardView({
         message: `Switch to the ${other === "closed" ? "Closed" : "Active"} tab to see what you saved.`,
         action: {
           label: other === "closed" ? "Show closed" : "Show active",
-          onClick: () => setStatus(other),
+          onClick: () => changeStatus(other),
         },
+      };
+    } else if (bubble && !tabAll.some((o) => inBubble(o, bubble))) {
+      empty = {
+        icon: bubble === "closing" ? CalendarX : Target,
+        title: bubble === "closing" ? "Nothing closes this week" : "No strong matches yet",
+        message:
+          bubble === "closing"
+            ? "No open opportunity closes in the next 7 days."
+            : "No open opportunity scores 80 or more yet.",
+        action: { label: "Show all open", onClick: () => setBubble(null) },
       };
     } else if (tabAll.length === 0) {
       empty =
@@ -295,8 +340,8 @@ export function DashboardView({
 
   const noun = visible.length === 1 ? "opportunity" : "opportunities";
   const countText = `${visible.length} ${status === "closed" ? "closed " : ""}${noun}${
-    savedOnly ? " you saved" : ""
-  }`;
+    bubble === "closing" ? " closing this week" : bubble === "strong" ? " scoring 80+" : ""
+  }${savedOnly ? " you saved" : ""}`;
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-12 pt-6 sm:px-6 sm:pt-8">
@@ -315,18 +360,20 @@ export function DashboardView({
           onClick={() => jumpTo("active")}
         />
         <StatBubble
-          value={closingSoon}
-          label="Closing this week"
+          value={closingSoonIds.size}
+          label={BUBBLE_LABELS.closing}
           dot="bg-ember"
-          action="Show active opportunities, closing soonest first"
-          onClick={() => jumpTo("active", "deadline")}
+          action="Show only these, closing soonest first"
+          pressed={bubble === "closing"}
+          onClick={() => showBubble("closing", "deadline")}
         />
         <StatBubble
           value={strongMatches}
-          label="Strong matches 80+"
+          label={BUBBLE_LABELS.strong}
           dot="bg-leaf"
-          action="Show active opportunities, best match first"
-          onClick={() => jumpTo("active", "match")}
+          action="Show only these, best match first"
+          pressed={bubble === "strong"}
+          onClick={() => showBubble("strong", "match")}
         />
         <StatBubble
           value={closedAll.length}
@@ -369,7 +416,7 @@ export function DashboardView({
               <button
                 type="button"
                 aria-pressed={status === "active"}
-                onClick={() => setStatus("active")}
+                onClick={() => changeStatus("active")}
                 className={cn(segmentClass(status === "active"), "flex-1 sm:flex-none")}
               >
                 Active
@@ -380,7 +427,7 @@ export function DashboardView({
               <button
                 type="button"
                 aria-pressed={status === "closed"}
-                onClick={() => setStatus("closed")}
+                onClick={() => changeStatus("closed")}
                 className={cn(segmentClass(status === "closed"), "flex-1 sm:flex-none")}
               >
                 Closed
@@ -450,7 +497,23 @@ export function DashboardView({
           aria-label="Filters"
           className="-mx-3 mt-2 flex gap-2 overflow-x-auto px-3 py-1 [scrollbar-width:none] sm:mx-0 sm:mt-3 sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden"
         >
+          {bubble ? (
+            <button
+              type="button"
+              onClick={() => {
+                setBubble(null);
+                // The chip disappears, so keep keyboard focus in the chip row.
+                allChipRef.current?.focus();
+              }}
+              aria-label={`Remove filter: ${BUBBLE_LABELS[bubble]}`}
+              className={cn(chipClass(true), "whitespace-nowrap")}
+            >
+              {BUBBLE_LABELS[bubble]}
+              <X aria-hidden="true" />
+            </button>
+          ) : null}
           <button
+            ref={allChipRef}
             type="button"
             aria-pressed={setAside === "all"}
             onClick={() => setSetAside("all")}
@@ -559,12 +622,15 @@ function StatBubble({
   label,
   dot,
   action,
+  pressed,
   onClick,
 }: {
   value: number;
   label: string;
   dot: string;
   action: string;
+  /** Set for filter bubbles: exposes aria-pressed and rings the selected one in sun. */
+  pressed?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -572,8 +638,13 @@ function StatBubble({
       type="button"
       onClick={onClick}
       aria-label={`${label}: ${value}. ${action}`}
+      aria-pressed={pressed}
       suppressHydrationWarning
-      className="flex min-w-0 items-center gap-3 rounded-bubble bg-cream px-4 py-2.5 text-left text-ink shadow-bubble hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sun/60 sm:block sm:p-4"
+      className={cn(
+        "flex min-w-0 items-center gap-3 rounded-bubble bg-cream px-4 py-2.5 text-left text-ink shadow-bubble hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sun/60 focus-visible:ring-offset-2 focus-visible:ring-offset-forest sm:block sm:p-4",
+        // Selected = solid sun ring; keyboard focus adds a gap, so the two read differently.
+        pressed && "ring-4 ring-sun focus-visible:ring-sun",
+      )}
     >
       <span
         className="block shrink-0 font-display text-2xl font-bold leading-tight tabular-nums sm:text-3xl"
