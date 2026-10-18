@@ -1,6 +1,14 @@
-import { differenceInCalendarDays, format, isValid, parseISO } from "date-fns";
+import { differenceInCalendarDays, format } from "date-fns";
 
-import { type DeadlineInfo, formatDeadline, getDeadlineInfo } from "@/lib/format";
+import {
+  type DeadlineInfo,
+  deadlineInstant,
+  easternCalendarDay,
+  easternDay,
+  formatDeadline,
+  getDeadlineInfo,
+  startInstant,
+} from "@/lib/format";
 import type { Opportunity } from "@/lib/types";
 
 /** An opportunity with no deadline counts as closed once it has been listed this long. */
@@ -23,12 +31,6 @@ export interface Lifecycle {
   deadline: DeadlineInfo;
 }
 
-function parse(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const date = parseISO(value);
-  return isValid(date) ? date : null;
-}
-
 /**
  * Open or closed? Closed when the deadline has passed, an agent marked it over,
  * or it never had a deadline and has been listed for more than STALE_AFTER_DAYS.
@@ -48,8 +50,9 @@ export function lifecycleOf(o: Opportunity, now: Date): Lifecycle {
   }
 
   if (deadline.status === "none") {
-    const listed = parse(o.posted_date) ?? parse(o.created_at);
-    if (listed && differenceInCalendarDays(now, listed) > STALE_AFTER_DAYS) {
+    // Count Eastern calendar days so the server (UTC) and the browser agree.
+    const listed = easternCalendarDay(o.posted_date) ?? easternCalendarDay(o.created_at);
+    if (listed && differenceInCalendarDays(easternDay(now), listed) > STALE_AFTER_DAYS) {
       return {
         closed: true,
         reason: `No deadline, listed since ${format(listed, "MMM d")}`,
@@ -61,12 +64,15 @@ export function lifecycleOf(o: Opportunity, now: Date): Lifecycle {
   return { closed: false, reason: null, deadline };
 }
 
-/** Share of the response window already used (0–1), from posting to the deadline. */
+/**
+ * Share of the response window already used (0–1), from posting to the deadline.
+ * Date-only values mean midnight to midnight Eastern, matching getDeadlineInfo.
+ */
 export function windowUsed(o: Opportunity, now: Date): number | null {
-  const end = parse(o.response_deadline);
-  const start = parse(o.posted_date) ?? parse(o.created_at);
-  if (!end || !start) return null;
-  const total = end.getTime() - start.getTime();
+  const end = deadlineInstant(o.response_deadline);
+  const start = startInstant(o.posted_date) ?? startInstant(o.created_at);
+  if (end === null || start === null) return null;
+  const total = end - start;
   if (total <= 0) return 1;
-  return Math.min(1, Math.max(0, (now.getTime() - start.getTime()) / total));
+  return Math.min(1, Math.max(0, (now.getTime() - start) / total));
 }

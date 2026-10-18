@@ -28,10 +28,20 @@ function toDate(value: string | null | undefined): Date | null {
   return isValid(parsed) ? parsed : null;
 }
 
-/** Format a date as e.g. "Mar 5, 2026", or an em dash when unavailable. */
+/**
+ * Format a date as e.g. "Mar 5, 2026", or an em dash when unavailable.
+ * Timestamps use the Eastern-Time day, so the server and the browser agree.
+ */
 export function formatDate(value: string | null | undefined): string {
   const date = toDate(value);
-  return date ? format(date, "MMM d, yyyy") : "—";
+  if (!value || !date) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return format(date, "MMM d, yyyy");
+  return date.toLocaleDateString("en-US", {
+    timeZone: DISPLAY_TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export type DeadlineStatus = "ok" | "soon" | "expired" | "none";
@@ -70,7 +80,7 @@ function calendarDay(date: Date): Date {
 }
 
 /** The Eastern-Time calendar day containing an instant, as local midnight. */
-function easternDay(date: Date): Date {
+export function easternDay(date: Date): Date {
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", {
     timeZone: DISPLAY_TIME_ZONE,
     year: "numeric",
@@ -81,6 +91,79 @@ function easternDay(date: Date): Date {
     .split("-")
     .map(Number);
   return new Date(y, m - 1, d);
+}
+
+/** [year, month, day] a value refers to: date-only values keep their own date, timestamps use Eastern Time. */
+function dayParts(value: string, date: Date): [number, number, number] {
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (plain) return [Number(plain[1]), Number(plain[2]), Number(plain[3])];
+  if (isDateOnly(value, date)) {
+    return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
+  }
+  const day = easternDay(date);
+  return [day.getFullYear(), day.getMonth() + 1, day.getDate()];
+}
+
+/**
+ * The calendar day a date or timestamp falls on (Eastern Time), as local midnight.
+ * Safe for day counting: the server (UTC) and the browser get the same answer.
+ */
+export function easternCalendarDay(value: string | null | undefined): Date | null {
+  const date = toDate(value);
+  if (!value || !date) return null;
+  const [y, m, d] = dayParts(value, date);
+  return new Date(y, m - 1, d);
+}
+
+/** Eastern-Time offset from UTC at an instant, in ms (e.g. -4h during daylight time). */
+function easternOffsetMs(instant: number): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: DISPLAY_TIME_ZONE,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  const wall = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return wall - (instant - (((instant % 1000) + 1000) % 1000));
+}
+
+/** The instant of an Eastern-Time wall-clock moment. */
+function easternInstant(y: number, m: number, d: number, endOfDay: boolean): number {
+  const guess = endOfDay ? Date.UTC(y, m - 1, d, 23, 59, 59, 999) : Date.UTC(y, m - 1, d);
+  return guess - easternOffsetMs(guess - easternOffsetMs(guess));
+}
+
+/** When a deadline actually ends, in ms: date-only deadlines run to 11:59:59 PM Eastern that day. */
+export function deadlineInstant(value: string | null | undefined): number | null {
+  const date = toDate(value);
+  if (!value || !date) return null;
+  if (!isDateOnly(value, date)) return date.getTime();
+  const [y, m, d] = dayParts(value, date);
+  return easternInstant(y, m, d, true);
+}
+
+/** When a date or timestamp starts, in ms: date-only values start at midnight Eastern. */
+export function startInstant(value: string | null | undefined): number | null {
+  const date = toDate(value);
+  if (!value || !date) return null;
+  if (!isDateOnly(value, date)) return date.getTime();
+  const [y, m, d] = dayParts(value, date);
+  return easternInstant(y, m, d, false);
 }
 
 /** Compute "X days left" style info for a deadline, honoring its time of day. */

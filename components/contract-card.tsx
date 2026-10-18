@@ -68,10 +68,7 @@ export function ContractCard({
   return (
     <article
       onClick={onOpen}
-      className={cn(
-        "flex cursor-pointer flex-col rounded-bubble bg-cream p-5 text-ink shadow-bubble",
-        life.closed && "bg-cream/90",
-      )}
+      className="flex min-w-0 cursor-pointer flex-col rounded-bubble bg-cream p-5 text-ink shadow-bubble [overflow-wrap:anywhere]"
     >
       <div className="flex min-h-7 items-start justify-between gap-3">
         {o.notice_type ? <TypeStamp>{o.notice_type}</TypeStamp> : <span />}
@@ -85,12 +82,12 @@ export function ContractCard({
             event.stopPropagation();
             onOpen();
           }}
-          className="line-clamp-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sun"
+          className="line-clamp-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-forest/30"
         >
           {o.title}
         </button>
       </h3>
-      {o.agency ? <p className="mt-1 line-clamp-1 text-sm text-ink/60">{o.agency}</p> : null}
+      {o.agency ? <p className="mt-1 line-clamp-1 text-sm text-ink/75">{o.agency}</p> : null}
 
       <div className="mt-4">
         <p className="text-sm text-ink/70" suppressHydrationWarning>
@@ -154,7 +151,7 @@ export function ContractCard({
             onClick={stop}
             aria-label={`Call ${o.poc_name ?? "the contracting officer"}`}
             title={o.poc_phone ?? undefined}
-            className={cn(pill.base, pill.forest, pill.icon)}
+            className={cn(pill.base, pill.forest, pill.icon, "focus-visible:ring-forest/30")}
           >
             <Phone />
           </a>
@@ -177,7 +174,7 @@ export function ContractCard({
             event.stopPropagation();
             toggle(o.id);
           }}
-          aria-label={saved ? "Remove from saved" : "Save opportunity"}
+          aria-label="Save opportunity"
           aria-pressed={saved}
           className={cn(pill.base, pill.ghost, pill.icon, "ml-auto")}
         >

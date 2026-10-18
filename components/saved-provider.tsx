@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -49,12 +50,11 @@ export function SavedProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const value: SavedContextValue = {
-    isSaved: (id) => saved.has(id),
-    toggle,
-    count: saved.size,
-    ready,
-  };
+  const isSaved = useCallback((id: string) => saved.has(id), [saved]);
+  const value = useMemo<SavedContextValue>(
+    () => ({ isSaved, toggle, count: saved.size, ready }),
+    [isSaved, toggle, saved, ready],
+  );
 
   return <SavedContext.Provider value={value}>{children}</SavedContext.Provider>;
 }

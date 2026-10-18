@@ -1,4 +1,4 @@
-import { type DeadlineStatus, toStringArray } from "@/lib/format";
+import { toStringArray } from "@/lib/format";
 import type { Opportunity } from "@/lib/types";
 
 /** Numeric relevance score, tolerating values that arrive as strings. */
@@ -36,18 +36,4 @@ export function competitionSummary(opportunity: Opportunity): string | null {
   const vendors = interestedVendors(opportunity).length;
   if (vendors) return `${vendors} interested ${vendors === 1 ? "vendor" : "vendors"}`;
   return null;
-}
-
-/** Text color for a deadline urgency status. */
-export function deadlineToneClass(status: DeadlineStatus): string {
-  switch (status) {
-    case "expired":
-      return "text-destructive";
-    case "soon":
-      return "text-amber-600";
-    case "ok":
-      return "text-emerald-600";
-    default:
-      return "text-muted-foreground";
-  }
 }

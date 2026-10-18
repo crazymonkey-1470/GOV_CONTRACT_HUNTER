@@ -35,7 +35,7 @@ export function ClosedSticker({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 rotate-[3deg] items-center rounded-xl bg-ink/10 px-3 py-1 font-display text-sm font-bold text-ink/60",
+        "inline-flex shrink-0 rotate-[3deg] items-center rounded-xl bg-ink/10 px-3 py-1 font-display text-sm font-bold text-ink/75 shadow-sticker",
         className,
       )}
     >
