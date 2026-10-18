@@ -140,7 +140,7 @@ export function ContractTable({
                             : status === "soon"
                               ? "text-ember-ink"
                               : status === "ok"
-                                ? "text-forest"
+                                ? "text-leaf"
                                 : "text-ink/70",
                         )}
                       >

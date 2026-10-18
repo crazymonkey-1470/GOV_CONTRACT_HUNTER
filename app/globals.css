@@ -5,39 +5,39 @@
 @tailwind utilities;
 
 /*
- * ContractHunter theme: forest-green page, sunshine-yellow actions, cream cards.
+ * ContractHunter theme: official navy page, gold actions, paper-white cards.
  * Surfaces (cards, drawer, inputs) use the shadcn tokens below; the page itself
- * is painted forest by the app shell and the login screen.
+ * is painted navy (the "forest" token) by the app shell and the login screen.
  */
 @layer base {
   :root {
-    --background: 48 47% 94%; /* cream #F7F4E8 */
-    --foreground: 155 43% 16%; /* ink on cream */
+    --background: 216 45% 98%; /* paper #F7F9FC */
+    --foreground: 215 31% 15%; /* slate ink #1B2533 */
 
-    --card: 48 47% 94%;
-    --card-foreground: 155 43% 16%;
+    --card: 216 45% 98%;
+    --card-foreground: 215 31% 15%;
 
-    --popover: 48 47% 94%;
-    --popover-foreground: 155 43% 16%;
+    --popover: 216 45% 98%;
+    --popover-foreground: 215 31% 15%;
 
-    --primary: 155 62% 20%; /* forest, readable on cream */
-    --primary-foreground: 57 82% 58%; /* sun */
+    --primary: 213 65% 19%; /* navy #112E51 */
+    --primary-foreground: 42 68% 54%; /* gold #D9A93B */
 
-    --secondary: 45 38% 87%; /* cream edge */
-    --secondary-foreground: 155 43% 16%;
+    --secondary: 214 30% 89%; /* paper edge #DCE3EC */
+    --secondary-foreground: 215 31% 15%;
 
-    --muted: 46 40% 90%;
-    --muted-foreground: 75 5% 40%;
+    --muted: 216 31% 94%;
+    --muted-foreground: 213 14% 41%;
 
-    --accent: 45 38% 87%;
-    --accent-foreground: 155 43% 16%;
+    --accent: 214 30% 89%;
+    --accent-foreground: 215 31% 15%;
 
-    --destructive: 9 66% 47%;
-    --destructive-foreground: 48 47% 96%;
+    --destructive: 5 72% 37%;
+    --destructive-foreground: 216 45% 98%;
 
-    --border: 44 30% 82%;
-    --input: 44 30% 80%;
-    --ring: 155 62% 24%;
+    --border: 215 28% 86%;
+    --input: 214 24% 83%;
+    --ring: 213 65% 19%;
 
     --radius: 1rem;
   }

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { SavedProvider } from "@/components/saved-provider";
 
-/** App frame: forest page, top bar with pill navigation, and the saved-state provider. */
+/** App frame: navy page, top bar with pill navigation, and the saved-state provider. */
 export function AppShell({
   email,
   children,

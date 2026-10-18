@@ -128,9 +128,8 @@ function DeadlineSection({
               suppressHydrationWarning
               className={cn(
                 "shrink-0 font-display text-sm font-semibold tabular-nums",
-                // text-leaf drops to ~4.2:1 on the inner panel, so the "plenty of
-                // time" label uses the darker forest green to stay above AA.
-                soon ? "text-ember-ink" : "text-forest",
+                // text-leaf measures 4.57:1 on the inner panel (AA for this size).
+                soon ? "text-ember-ink" : "text-leaf",
               )}
             >
               {life.deadline.label}

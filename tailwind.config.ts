@@ -17,14 +17,17 @@ const config: Config = {
         display: ["Fredoka", '"Nunito Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
         serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
       },
+      // Official navy & gold palette. Token names are role names kept from the
+      // first theme: forest = page navy, sun = gold accent, cream = paper cards,
+      // ink = slate text, leaf = on-track green, ember = closing-soon red.
       colors: {
-        forest: { DEFAULT: "#13523A", deep: "#0E3F2C" },
-        sun: { DEFAULT: "#ECE13B", soft: "#F6EF8A" },
-        cream: { DEFAULT: "#F7F4E8", edge: "#E9E2CD" },
-        ink: "#173A2C",
-        leaf: "#12804E",
-        ember: { DEFAULT: "#E8743B", ink: "#B24A16" },
-        sky: "#6FA3E8",
+        forest: { DEFAULT: "#112E51", deep: "#0B1F3A" },
+        sun: { DEFAULT: "#D9A93B", soft: "#ECD593" },
+        cream: { DEFAULT: "#F7F9FC", edge: "#DCE3EC" },
+        ink: "#1B2533",
+        leaf: "#1F7A4D",
+        ember: { DEFAULT: "#C8432B", ink: "#A3261A" },
+        sky: "#4A77B4",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -66,8 +69,8 @@ const config: Config = {
         bubble: "1.75rem",
       },
       boxShadow: {
-        sticker: "0 2px 0 rgba(14, 63, 44, 0.25)",
-        bubble: "0 3px 0 rgba(8, 40, 27, 0.35)",
+        sticker: "0 2px 0 rgba(11, 31, 58, 0.25)",
+        bubble: "0 3px 0 rgba(6, 18, 36, 0.35)",
       },
       keyframes: {
         "accordion-down": {

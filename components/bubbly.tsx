@@ -13,7 +13,7 @@ export const pill = {
   icon: "w-10 px-0",
 };
 
-/** Tilted yellow "92% match" sticker. Strong matches get the brightest yellow. */
+/** Tilted gold "92% match" sticker. Strong matches get the strongest gold. */
 export function MatchSticker({ score, className }: { score: number; className?: string }) {
   const value = Math.round(score);
   return (
@@ -87,7 +87,7 @@ export function TimeBar({
   );
 }
 
-/** Centered section heading between two fading yellow rules, as on the reference design. */
+/** Centered section heading between two fading gold rules. */
 export function SectionHeading({ children, id }: { children: ReactNode; id?: string }) {
   return (
     <div className="flex items-center gap-4">
@@ -103,7 +103,7 @@ export function SectionHeading({ children, id }: { children: ReactNode; id?: str
   );
 }
 
-/** The stacked yellow wordmark. */
+/** The stacked gold wordmark. */
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span
