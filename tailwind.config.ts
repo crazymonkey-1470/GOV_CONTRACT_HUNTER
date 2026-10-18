@@ -13,10 +13,18 @@ const config: Config = {
     },
     extend: {
       fontFamily: {
-        sans: ['"Hanken Grotesk"', "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
+        sans: ['"Nunito Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Fredoka", '"Nunito Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
       },
       colors: {
+        forest: { DEFAULT: "#13523A", deep: "#0E3F2C" },
+        sun: { DEFAULT: "#ECE13B", soft: "#F6EF8A" },
+        cream: { DEFAULT: "#F7F4E8", edge: "#E9E2CD" },
+        ink: "#173A2C",
+        leaf: "#12804E",
+        ember: { DEFAULT: "#E8743B", ink: "#B24A16" },
+        sky: "#6FA3E8",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -53,8 +61,13 @@ const config: Config = {
       },
       borderRadius: {
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        md: "calc(var(--radius) - 4px)",
+        sm: "calc(var(--radius) - 8px)",
+        bubble: "1.75rem",
+      },
+      boxShadow: {
+        sticker: "0 2px 0 rgba(14, 63, 44, 0.25)",
+        bubble: "0 3px 0 rgba(8, 40, 27, 0.35)",
       },
       keyframes: {
         "accordion-down": {

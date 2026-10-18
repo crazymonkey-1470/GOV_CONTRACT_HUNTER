@@ -63,6 +63,17 @@ alter table public.contract_opportunities
   add column if not exists poc_email    text,        -- contracting officer email
   add column if not exists requirements text[];      -- short bullet list of key requirements
 
+-- At-a-glance bid info: process, fast contact, competition (migration 005).
+alter table public.contract_opportunities
+  add column if not exists questions_deadline      timestamptz,
+  add column if not exists submission_method       text,
+  add column if not exists submission_instructions text,
+  add column if not exists poc_phone               text,
+  add column if not exists place_of_performance    text,
+  add column if not exists incumbent               text,
+  add column if not exists interested_vendors      text[],
+  add column if not exists interested_vendors_url  text;
+
 create table if not exists public.sourcing_portals (
   id              uuid primary key default gen_random_uuid(),
   name            text not null,

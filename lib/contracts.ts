@@ -22,6 +22,22 @@ export function requirementsList(opportunity: Opportunity): string[] {
   return toStringArray(opportunity.requirements);
 }
 
+export function interestedVendors(opportunity: Opportunity): string[] {
+  return toStringArray(opportunity.interested_vendors);
+}
+
+/**
+ * What's publicly known about competition: the incumbent, or how many vendors
+ * are on the public interested-vendor / plan-holder list. Bids themselves stay
+ * sealed until opening or award.
+ */
+export function competitionSummary(opportunity: Opportunity): string | null {
+  if (opportunity.incumbent) return `Incumbent: ${opportunity.incumbent}`;
+  const vendors = interestedVendors(opportunity).length;
+  if (vendors) return `${vendors} interested ${vendors === 1 ? "vendor" : "vendors"}`;
+  return null;
+}
+
 /** Text color for a deadline urgency status. */
 export function deadlineToneClass(status: DeadlineStatus): string {
   switch (status) {

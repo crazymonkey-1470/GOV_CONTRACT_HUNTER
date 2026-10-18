@@ -29,6 +29,15 @@ export interface Opportunity {
   poc_name: string | null;
   poc_email: string | null;
   requirements: string[] | string | null;
+  // Bid process, fast contact and competition (migration 005; filled by agents).
+  questions_deadline?: string | null;
+  submission_method?: string | null;
+  submission_instructions?: string | null;
+  poc_phone?: string | null;
+  place_of_performance?: string | null;
+  incumbent?: string | null;
+  interested_vendors?: string[] | string | null;
+  interested_vendors_url?: string | null;
 }
 
 /** Minimum relevance score shown on the dashboard (per the product brief). */

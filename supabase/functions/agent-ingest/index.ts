@@ -1,9 +1,14 @@
 // ContractHunter agent ingest endpoint (Supabase Edge Function: agent-ingest)
 //
-// Discovery agents (the Grok bots) POST opportunities here instead of holding a
-// database key. The endpoint can only INSERT new rows into
-// public.contract_opportunities: it never updates or deletes, and a row whose
-// notice_id already exists is skipped.
+// Discovery agents (the Grok bots) send opportunities here instead of holding a
+// database key.
+//   POST  new notice_id      -> inserted
+//         known notice_id    -> "enriched": only EMPTY fields are filled in (never
+//                               overwritten); interested_vendors lists are merged
+//   GET                      -> field reference
+//   GET ?view=known          -> open notices + which fields are still missing
+//   GET ?view=portals        -> sourcing portals to search, with search codes
+// It never deletes, and never changes title, relevance_score, status or a filled field.
 //
 // Auth: send the agent key as `x-agent-key: <key>` or `Authorization: Bearer <key>`.
 // Only SHA-256 hashes of keys are stored below. To add or revoke an agent, edit
@@ -47,7 +52,20 @@ const COLUMNS = [
   "poc_name",
   "poc_email",
   "requirements",
+  "questions_deadline",
+  "submission_method",
+  "submission_instructions",
+  "poc_phone",
+  "place_of_performance",
+  "incumbent",
+  "interested_vendors",
+  "interested_vendors_url",
 ];
+
+/** Columns a later send may fill in on an existing row, but only while they are empty. */
+const FILL_COLUMNS = COLUMNS.filter(
+  (c) => !["notice_id", "title", "relevance_score", "raw_data", "interested_vendors"].includes(c),
+);
 
 /** Accepted input fields that don't map 1:1 to a column. */
 const EXTRA_FIELDS = new Set(["psc_code"]);
@@ -80,11 +98,30 @@ const ALIASES: Record<string, string> = {
   noticeType: "notice_type",
   pocName: "poc_name",
   pocEmail: "poc_email",
+  pocPhone: "poc_phone",
+  phone: "poc_phone",
   customerFitNotes: "customer_fit_notes",
   rawData: "raw_data",
   description: "summary",
   psc: "psc_code",
   classificationCode: "psc_code",
+  questions_due: "questions_deadline",
+  questionsDeadline: "questions_deadline",
+  question_deadline: "questions_deadline",
+  submissionMethod: "submission_method",
+  how_to_submit: "submission_method",
+  submit_via: "submission_method",
+  submissionInstructions: "submission_instructions",
+  instructions: "submission_instructions",
+  placeOfPerformance: "place_of_performance",
+  location: "place_of_performance",
+  incumbent_contractor: "incumbent",
+  current_contractor: "incumbent",
+  interestedVendors: "interested_vendors",
+  plan_holders: "interested_vendors",
+  planholders: "interested_vendors",
+  interestedVendorsUrl: "interested_vendors_url",
+  planholders_url: "interested_vendors_url",
 };
 
 const HELP = {
@@ -95,8 +132,15 @@ const HELP = {
     `At most ${MAX_ROWS} per request.`,
   dry_run: 'Add ?dry_run=1 or "dry_run": true to validate without writing anything.',
   behavior:
-    "Insert-only. An opportunity whose notice_id already exists is skipped, never overwritten. " +
-    "Rows with missing/invalid required fields are rejected; invalid optional fields are dropped with a warning.",
+    "A new notice_id is inserted. A known notice_id is enriched: only empty fields are filled in, " +
+    "nothing is overwritten, and interested_vendors lists are merged. Rows with missing/invalid " +
+    "required fields are rejected; invalid optional fields are dropped with a warning.",
+  views: {
+    "?view=known":
+      "Open notices already in ContractHunter, with the fields each is still missing. " +
+      "Check it before researching, and send missing fields for known notices.",
+    "?view=portals": "Procurement portals to search, with their search codes, least recently checked first.",
+  },
   required: {
     notice_id: "the solicitation / notice number (unique)",
     title: "text",
@@ -104,23 +148,84 @@ const HELP = {
   },
   optional: {
     agency: "text",
+    place_of_performance: "city / state, e.g. San Diego, CA",
     value: "number in USD (\"$1,200,000\" is accepted)",
     posted_date: "date, e.g. 2026-10-17",
     response_deadline: "ISO 8601 date-time with timezone, e.g. 2026-11-05T14:00:00-05:00",
+    questions_deadline: "ISO 8601 date-time: when questions to the contracting officer are due",
     sam_link: "http(s) URL of the notice; powers the View & Apply button",
-    summary: "text",
-    keywords: "list of strings",
-    naics_codes: "list of 6-digit NAICS codes",
-    psc_code: "PSC / classification code, e.g. DA01",
+    notice_type: "text, e.g. Solicitation, RFP, RFQ, Sources Sought, RFI",
     set_aside: "text, e.g. Total Small Business Set-Aside (FAR 19.5)",
+    summary: "text: 2-4 sentences on what they are buying",
     customer_fit_notes: "text: why this fits LIMS consulting",
-    notice_type: "text, e.g. Solicitation, Sources Sought",
+    requirements: "list of strings",
+    submission_method: "how to respond, e.g. Email to CO, SAM.gov, Bonfire portal, BidNet",
+    submission_instructions: "short steps from the notice: format, page limits, required forms",
     poc_name: "text",
     poc_email: "email address",
-    requirements: "list of strings",
+    poc_phone: "phone number",
+    incumbent: "current contract holder (recompetes)",
+    interested_vendors: "list of publicly listed interested vendors / plan holders",
+    interested_vendors_url: "URL of the public interested-vendors / plan-holders list",
+    naics_codes: "list of 6-digit NAICS codes",
+    psc_code: "PSC / classification code, e.g. DA01",
+    keywords: "list of strings",
     raw_data: "object with the original source data (max 50 KB)",
   },
 };
+
+const quoted = (c: string) => `"${c}"`;
+const CHANGED = [
+  ...FILL_COLUMNS.map((c) => `(t.${quoted(c)} is null and s.${quoted(c)} is not null)`),
+  "(s.interested_vendors is not null and not (s.interested_vendors <@ coalesce(t.interested_vendors, '{}'::text[])))",
+].join("\n      or ");
+
+const ENRICH_SQL = `
+  update public.contract_opportunities as t set
+    ${FILL_COLUMNS.map((c) => `${quoted(c)} = coalesce(t.${quoted(c)}, s.${quoted(c)})`).join(",\n    ")},
+    interested_vendors = case
+      when s.interested_vendors is null then t.interested_vendors
+      else (select array_agg(distinct v order by v)
+            from unnest(coalesce(t.interested_vendors, '{}'::text[]) || s.interested_vendors) as v)
+    end,
+    raw_data = coalesce(t.raw_data, '{}'::jsonb)
+      || jsonb_build_object('_last_enriched', jsonb_build_object('agent', $2::text, 'at', now()))
+  from jsonb_populate_recordset(null::public.contract_opportunities, $1::text::jsonb) as s
+  where t.notice_id = s.notice_id
+    and (${CHANGED})
+  returning t.notice_id`;
+
+const WOULD_ENRICH_SQL = `
+  select s.notice_id
+  from jsonb_populate_recordset(null::public.contract_opportunities, $1::text::jsonb) as s
+  join public.contract_opportunities as t on t.notice_id = s.notice_id
+  where ${CHANGED}`;
+
+const KNOWN_SQL = `
+  select notice_id, title, agency, response_deadline, sam_link,
+    array_remove(array[
+      case when sam_link is null then 'sam_link' end,
+      case when response_deadline is null then 'response_deadline' end,
+      case when questions_deadline is null then 'questions_deadline' end,
+      case when submission_method is null then 'submission_method' end,
+      case when submission_instructions is null then 'submission_instructions' end,
+      case when poc_email is null then 'poc_email' end,
+      case when poc_phone is null then 'poc_phone' end,
+      case when place_of_performance is null then 'place_of_performance' end,
+      case when incumbent is null then 'incumbent' end,
+      case when interested_vendors is null then 'interested_vendors' end
+    ], null) as missing
+  from public.contract_opportunities
+  where response_deadline >= now() - interval '1 day'
+     or (response_deadline is null and created_at >= now() - interval '30 days')
+  order by response_deadline nulls last
+  limit 500`;
+
+const PORTALS_SQL = `
+  select name, state, portal_type, portal_url, search_keywords, notes, last_checked
+  from public.sourcing_portals
+  where is_active
+  order by last_checked nulls first, name`;
 
 const dbUrl = Deno.env.get("SUPABASE_DB_URL");
 const sql = dbUrl
@@ -255,9 +360,20 @@ function validate(input: unknown, index: number, agent: string, receivedAt: stri
   const email = (field: string) => {
     const v = src[field];
     if (isBlank(v)) return;
-    const s = String(v).trim();
+    const s = String(v).trim().replace(/^mailto:/i, "");
     if (s.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
       return problem(field, "is not an email address", false);
+    }
+    row[field] = s;
+  };
+
+  const phone = (field: string) => {
+    const v = src[field];
+    if (isBlank(v)) return;
+    const s = String(v).trim().replace(/^tel:/i, "");
+    const digits = s.replace(/\D/g, "");
+    if (s.length > 40 || digits.length < 7 || !/^[+()\d\s.\-\/xXextEXT]+$/.test(s)) {
+      return problem(field, "is not a phone number", false);
     }
     row[field] = s;
   };
@@ -309,6 +425,7 @@ function validate(input: unknown, index: number, agent: string, receivedAt: stri
   number("value", 0, 1e13);
   date("posted_date", true);
   date("response_deadline", false);
+  date("questions_deadline", false);
   link("sam_link");
   text("summary", 20000);
   list("keywords", /[,;\n]/, 50, 200);
@@ -318,7 +435,14 @@ function validate(input: unknown, index: number, agent: string, receivedAt: stri
   text("notice_type", 200);
   text("poc_name", 300);
   email("poc_email");
+  phone("poc_phone");
   list("requirements", /[;\n]/, 50, 2000);
+  text("submission_method", 500);
+  text("submission_instructions", 5000);
+  text("place_of_performance", 300);
+  text("incumbent", 300);
+  list("interested_vendors", /[;\n]/, 200, 300);
+  link("interested_vendors_url");
 
   // raw_data keeps the source payload, plus the PSC code (read by the dashboard's
   // priority badges) and which agent sent the row.
@@ -351,7 +475,35 @@ Deno.serve(async (req) => {
   const agent = key ? AGENT_KEYS[await sha256Hex(key)] : undefined;
   if (!agent) return json(401, { ok: false, error: "missing or invalid agent key" });
 
-  if (req.method === "GET") return json(200, { ok: true, agent, ...HELP });
+  const url = new URL(req.url);
+
+  if (req.method === "GET") {
+    const view = url.searchParams.get("view");
+    if (!view) return json(200, { ok: true, agent, ...HELP });
+    if (!sql) return json(500, { ok: false, error: "database connection is not configured" });
+    try {
+      if (view === "known") {
+        const open = await sql.unsafe(KNOWN_SQL);
+        const all = await sql`select notice_id from public.contract_opportunities where notice_id is not null`;
+        return json(200, {
+          ok: true,
+          open_count: open.length,
+          open,
+          all_notice_ids: all.map((r) => r.notice_id),
+          note: "Skip notices you'd only re-send unchanged; send missing fields for known ones.",
+        });
+      }
+      if (view === "portals") {
+        const portals = await sql.unsafe(PORTALS_SQL);
+        return json(200, { ok: true, count: portals.length, portals });
+      }
+    } catch (err) {
+      console.error("agent-ingest read error", err);
+      return json(500, { ok: false, error: "database error" });
+    }
+    return json(400, { ok: false, error: 'unknown view; use "known" or "portals"' });
+  }
+
   if (req.method !== "POST") return json(405, { ok: false, error: "use POST (or GET for help)" });
   if (!sql) return json(500, { ok: false, error: "database connection is not configured" });
 
@@ -370,7 +522,7 @@ Deno.serve(async (req) => {
     return json(400, { ok: false, error: "body must be valid JSON" });
   }
 
-  let dryRun = ["1", "true"].includes(new URL(req.url).searchParams.get("dry_run") ?? "");
+  let dryRun = ["1", "true"].includes(url.searchParams.get("dry_run") ?? "");
   let inputs: unknown[];
   if (Array.isArray(payload)) {
     inputs = payload;
@@ -406,27 +558,39 @@ Deno.serve(async (req) => {
   const valid = items.filter((i) => i.row);
   const ids = valid.map((i) => i.notice_id as string);
   let added: string[] = [];
-  let existing: string[] = [];
+  let enriched: string[] = [];
+  let unchanged: string[] = [];
 
   try {
-    if (valid.length && dryRun) {
-      const found = await sql`
-        select notice_id from public.contract_opportunities
-        where notice_id in (select jsonb_array_elements_text(${sql.json(ids)}::jsonb))`;
-      const foundIds = new Set(found.map((r) => r.notice_id as string));
-      existing = ids.filter((id) => foundIds.has(id));
-      added = ids.filter((id) => !foundIds.has(id));
-    } else if (valid.length) {
-      const rows = valid.map((i) => i.row);
-      const result = await sql`
-        insert into public.contract_opportunities (${sql(COLUMNS)})
-        select ${sql(COLUMNS)}
-        from jsonb_populate_recordset(null::public.contract_opportunities, ${sql.json(rows)}::jsonb)
-        on conflict (notice_id) do nothing
-        returning notice_id`;
-      const insertedIds = new Set(result.map((r) => r.notice_id as string));
-      added = ids.filter((id) => insertedIds.has(id));
-      existing = ids.filter((id) => !insertedIds.has(id));
+    if (valid.length) {
+      const rows = valid.map((i) => i.row as Record<string, unknown>);
+      let existingIds: Set<string>;
+      if (dryRun) {
+        const found = await sql`
+          select notice_id from public.contract_opportunities
+          where notice_id in (select jsonb_array_elements_text(${sql.json(ids)}::jsonb))`;
+        existingIds = new Set(found.map((r) => r.notice_id as string));
+      } else {
+        const result = await sql`
+          insert into public.contract_opportunities (${sql(COLUMNS)})
+          select ${sql(COLUMNS)}
+          from jsonb_populate_recordset(null::public.contract_opportunities, ${sql.json(rows)}::jsonb)
+          on conflict (notice_id) do nothing
+          returning notice_id`;
+        const insertedIds = new Set(result.map((r) => r.notice_id as string));
+        existingIds = new Set(ids.filter((id) => !insertedIds.has(id)));
+      }
+      added = ids.filter((id) => !existingIds.has(id));
+
+      const existingRows = rows.filter((r) => existingIds.has(r.notice_id as string));
+      if (existingRows.length) {
+        const changed = dryRun
+          ? await sql.unsafe(WOULD_ENRICH_SQL, [JSON.stringify(existingRows)])
+          : await sql.unsafe(ENRICH_SQL, [JSON.stringify(existingRows), agent]);
+        const changedIds = new Set(changed.map((r) => r.notice_id as string));
+        enriched = ids.filter((id) => changedIds.has(id));
+        unchanged = ids.filter((id) => existingIds.has(id) && !changedIds.has(id));
+      }
     }
   } catch (err) {
     console.error("agent-ingest database error", err);
@@ -449,7 +613,8 @@ Deno.serve(async (req) => {
     dry_run: dryRun,
     received: items.length,
     inserted: dryRun ? 0 : added.length,
-    skipped_existing: existing.length,
+    enriched: dryRun ? 0 : enriched.length,
+    unchanged: unchanged.length,
     rejected: rejected.length,
   }));
 
@@ -459,7 +624,8 @@ Deno.serve(async (req) => {
     agent,
     received: items.length,
     [dryRun ? "would_insert" : "inserted"]: added,
-    skipped_existing: existing,
+    [dryRun ? "would_enrich" : "enriched"]: enriched,
+    skipped_existing: unchanged,
     rejected,
     warnings,
   });
