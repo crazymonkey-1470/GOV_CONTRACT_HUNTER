@@ -17,6 +17,10 @@ const NAV = [
 const SAVED_ROW =
   "ml-1 hidden items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:flex";
 
+/** Phones: the Saved row is hidden, so the top bar gets an icon-only link instead. */
+const SAVED_ICON =
+  "flex items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:hidden";
+
 export function AppSidebar({ email }: { email?: string | null }) {
   const pathname = usePathname();
   const { count, ready } = useSaved();
@@ -44,6 +48,7 @@ export function AppSidebar({ email }: { email?: string | null }) {
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   };
 
+  const savedLabel = `Saved (${ready ? count : 0})`;
   const savedContent = (
     <>
       <Bookmark className="h-4 w-4 shrink-0" />
@@ -99,6 +104,15 @@ export function AppSidebar({ email }: { email?: string | null }) {
           ) : (
             <Link href="/dashboard#saved" className={SAVED_ROW}>
               {savedContent}
+            </Link>
+          )}
+          {pathname === "/dashboard" ? (
+            <a href="#saved" aria-label={savedLabel} className={SAVED_ICON}>
+              <Bookmark className="h-4 w-4 shrink-0" />
+            </a>
+          ) : (
+            <Link href="/dashboard#saved" aria-label={savedLabel} className={SAVED_ICON}>
+              <Bookmark className="h-4 w-4 shrink-0" />
             </Link>
           )}
         </nav>

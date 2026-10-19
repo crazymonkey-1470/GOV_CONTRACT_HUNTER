@@ -82,10 +82,11 @@ function Section({
 function DeadlineValue({ o, life }: { o: Opportunity; life: Lifecycle }) {
   if (life.closed) {
     return (
-      <span className="font-medium text-destructive" suppressHydrationWarning>
-        {life.deadline.status === "expired" || !o.response_deadline
-          ? life.reason
-          : `${formatDeadline(o.response_deadline, { year: true })} · ${life.reason}`}
+      <span className="flex flex-wrap gap-x-2 font-medium text-destructive" suppressHydrationWarning>
+        {life.deadline.status !== "expired" && o.response_deadline ? (
+          <span>{formatDeadline(o.response_deadline, { year: true })}</span>
+        ) : null}
+        <span>{life.reason}</span>
       </span>
     );
   }
@@ -93,11 +94,10 @@ function DeadlineValue({ o, life }: { o: Opportunity; life: Lifecycle }) {
     return <span className="text-muted-foreground">No deadline listed yet</span>;
   }
   return (
-    <span suppressHydrationWarning>
+    <span className="flex flex-wrap gap-x-2" suppressHydrationWarning>
       <span className="font-medium">{formatDeadline(o.response_deadline, { year: true })}</span>
-      <span className={cn("font-medium", deadlineToneClass(life.deadline.status))}>
-        {" "}
-        · {life.deadline.label}
+      <span className={cn("whitespace-nowrap font-medium", deadlineToneClass(life.deadline.status))}>
+        {life.deadline.label}
       </span>
     </span>
   );
@@ -331,15 +331,15 @@ export function ContractDrawer({
                 </Fact>
                 {questions && questions.status !== "none" ? (
                   <Fact label="Questions due" className="col-span-2">
-                    <span
-                      suppressHydrationWarning
-                      className={cn(questionsPassed && "text-muted-foreground line-through")}
-                    >
-                      {formatDeadline(o.questions_deadline, { year: true })}
+                    <span className="flex flex-wrap gap-x-2">
+                      <span
+                        suppressHydrationWarning
+                        className={cn(questionsPassed && "text-muted-foreground line-through")}
+                      >
+                        {formatDeadline(o.questions_deadline, { year: true })}
+                      </span>
+                      {questionsPassed ? <span className="text-muted-foreground">passed</span> : null}
                     </span>
-                    {questionsPassed ? (
-                      <span className="text-muted-foreground"> · passed</span>
-                    ) : null}
                   </Fact>
                 ) : null}
                 {o.notice_id ? (

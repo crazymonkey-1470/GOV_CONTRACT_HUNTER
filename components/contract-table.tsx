@@ -46,9 +46,9 @@ function DeadlineCell({
     );
   }
   return (
-    <span suppressHydrationWarning>
-      <span className="text-foreground">{formatDeadline(o.response_deadline)}</span>{" "}
-      <span className={tone}>· {life.deadline.label}</span>
+    <span className="flex flex-wrap gap-x-2" suppressHydrationWarning>
+      <span className="text-foreground">{formatDeadline(o.response_deadline)}</span>
+      <span className={tone}>{life.deadline.label}</span>
     </span>
   );
 }
@@ -108,14 +108,9 @@ export function ContractTable({
                     <span>{o.title}</span>
                   </button>
                   {o.agency || o.notice_id ? (
-                    <div className="text-xs text-muted-foreground">
-                      {o.agency}
-                      {o.notice_id ? (
-                        <span className="font-mono">
-                          {o.agency ? " · " : ""}
-                          {o.notice_id}
-                        </span>
-                      ) : null}
+                    <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                      {o.agency ? <span>{o.agency}</span> : null}
+                      {o.notice_id ? <span className="font-mono">{o.notice_id}</span> : null}
                     </div>
                   ) : null}
                   {/* Phones hide the Deadline column, so show it here. */}

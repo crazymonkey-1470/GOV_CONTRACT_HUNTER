@@ -176,13 +176,13 @@ export function ContractCard({
             <CalendarClock
               className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", deadlineToneClass(deadline.status))}
             />
-            <span className="min-w-0">
+            {/* Two wrap items, so a wrapped countdown never starts with a separator. */}
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
               <span className="font-medium text-foreground">
                 Due {formatDeadline(o.response_deadline)}
               </span>
               <span className={cn("whitespace-nowrap font-medium", deadlineToneClass(deadline.status))}>
-                {" "}
-                · {deadline.label}
+                {deadline.label}
               </span>
             </span>
           </p>

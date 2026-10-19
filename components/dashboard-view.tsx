@@ -320,7 +320,7 @@ export function DashboardView({
   return (
     <div>
       {/* Header */}
-      <header className="sticky top-[57px] z-20 border-b bg-background/85 backdrop-blur md:top-0">
+      <header className="z-20 border-b bg-background/85 backdrop-blur md:sticky md:top-0">
         <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -421,69 +421,73 @@ export function DashboardView({
             </SegmentButton>
           </div>
 
-          {bubble ? (
+          {/* Phones: one sideways-scrolling row of chips. From sm up the wrapper
+              disappears (display: contents) and the chips wrap with the controls. */}
+          <div className="-mx-4 flex w-full gap-2 overflow-x-auto px-4 py-0.5 [scrollbar-width:none] sm:contents [&::-webkit-scrollbar]:hidden">
+            {bubble ? (
+              <Chip
+                active
+                onClick={() => {
+                  setBubble(null);
+                  // The chip disappears, so keep keyboard focus in the chip row.
+                  allChipRef.current?.focus();
+                }}
+                ariaLabel={`Remove filter: ${BUBBLE_LABELS[bubble]}`}
+              >
+                {BUBBLE_LABELS[bubble]}
+                <X className="h-3.5 w-3.5" />
+              </Chip>
+            ) : null}
             <Chip
-              active
-              onClick={() => {
-                setBubble(null);
-                // The chip disappears, so keep keyboard focus in the chip row.
-                allChipRef.current?.focus();
-              }}
-              ariaLabel={`Remove filter: ${BUBBLE_LABELS[bubble]}`}
+              buttonRef={allChipRef}
+              active={setAside === "all"}
+              onClick={() => setSetAside("all")}
             >
-              {BUBBLE_LABELS[bubble]}
-              <X className="h-3.5 w-3.5" />
+              All
             </Chip>
-          ) : null}
-          <Chip
-            buttonRef={allChipRef}
-            active={setAside === "all"}
-            onClick={() => setSetAside("all")}
-          >
-            All
-          </Chip>
-          {setAsideOptions.map((option) => (
-            <Chip
-              key={option}
-              active={setAside === option}
-              onClick={() => setSetAside(option)}
-              title={option}
-              className="max-w-[16rem]"
+            {setAsideOptions.map((option) => (
+              <Chip
+                key={option}
+                active={setAside === option}
+                onClick={() => setSetAside(option)}
+                title={option}
+                className="max-w-[16rem]"
+              >
+                <span className="truncate">{option}</span>
+              </Chip>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setPriorityOnly((value) => !value)}
+              aria-pressed={priorityOnly}
+              title={PRIORITY_CODES_TITLE}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+                priorityOnly
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              )}
             >
-              <span className="truncate">{option}</span>
-            </Chip>
-          ))}
+              <Target className="h-3.5 w-3.5" />
+              Priority codes
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setPriorityOnly((value) => !value)}
-            aria-pressed={priorityOnly}
-            title={PRIORITY_CODES_TITLE}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors",
-              priorityOnly
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Target className="h-3.5 w-3.5" />
-            Priority codes
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSavedFilter(!savedOnly)}
-            aria-pressed={savedOnly}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors",
-              savedOnly
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Bookmark className={cn("h-3.5 w-3.5", savedOnly && "fill-current")} />
-            Saved{savedCount > 0 ? ` (${savedCount})` : ""}
-          </button>
+            <button
+              type="button"
+              onClick={() => setSavedFilter(!savedOnly)}
+              aria-pressed={savedOnly}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+                savedOnly
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Bookmark className={cn("h-3.5 w-3.5", savedOnly && "fill-current")} />
+              Saved{savedCount > 0 ? ` (${savedCount})` : ""}
+            </button>
+          </div>
 
           <div className="ml-auto flex items-center gap-2">
             <label htmlFor="sort" className="text-xs text-muted-foreground">
@@ -665,7 +669,7 @@ function Chip({
       aria-label={ariaLabel}
       aria-pressed={ariaLabel ? undefined : active}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+        "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium transition-colors",
         active
           ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-card text-muted-foreground hover:text-foreground",
