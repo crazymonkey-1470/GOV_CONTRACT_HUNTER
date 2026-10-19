@@ -1,28 +1,20 @@
 "use client";
 
-import { useEffect, useId, useState, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Bookmark,
-  CalendarClock,
   Check,
-  CheckCircle2,
   ExternalLink,
-  FileText,
-  Info,
-  ListChecks,
+  Mail,
   MapPin,
   MessageCircleQuestion,
   Phone,
   Send,
-  Sparkles,
-  Tags,
-  UserRound,
-  Users,
 } from "lucide-react";
 
-import { ClosedSticker, MatchSticker, TimeBar, TypeStamp, pill } from "@/components/bubbly";
-import { useSaved } from "@/components/saved-provider";
+import { MatchBadge } from "@/components/match-badge";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -30,138 +22,84 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useSaved } from "@/components/saved-provider";
 import { emailHref, phoneHref } from "@/lib/contact";
 import {
+  deadlineToneClass,
   interestedVendors,
   naicsList,
   requirementsList,
-  scoreOf,
   visibleKeywords,
 } from "@/lib/contracts";
 import { formatCurrency, formatDate, formatDeadline, getDeadlineInfo } from "@/lib/format";
-import { type Lifecycle, lifecycleOf, windowUsed } from "@/lib/lifecycle";
+import { type Lifecycle, lifecycleOf } from "@/lib/lifecycle";
 import { TARGET_NAICS, TARGET_PSC, pscOf } from "@/lib/priority";
 import { responseSteps } from "@/lib/process";
 import { cn } from "@/lib/utils";
 import type { Opportunity } from "@/lib/types";
 
-/** Interested vendors shown as chips before collapsing into "+N more". */
+/** Interested vendors shown as badges before collapsing into "+N more". */
 const VENDOR_LIMIT = 12;
 
-/** Static chip on cream (same as the card's fact chips). */
-const chip =
-  "inline-flex max-w-full items-center gap-1.5 rounded-full bg-cream-edge px-2.5 py-1 text-xs font-semibold text-ink/80";
-
-/** Highlight for NAICS / PSC codes on the LIMS-consulting target list. */
-const targetCode = "rounded-md bg-sun-soft px-1 font-bold text-ink";
-
-function Section({
-  icon: Icon,
-  title,
-  panel = false,
+function Fact({
+  label,
+  className,
   children,
 }: {
-  icon: LucideIcon;
-  title: string;
-  /** Sit the section in an inner panel on the cream sheet. */
-  panel?: boolean;
+  label: string;
+  className?: string;
   children: ReactNode;
 }) {
-  const id = useId();
   return (
-    <section aria-labelledby={id} className={cn(panel && "rounded-2xl bg-cream-edge/50 p-4")}>
-      <h3 id={id} className="flex items-center gap-2 font-display text-base font-bold text-ink">
-        <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-forest" />
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-0.5 break-words text-sm text-foreground">{children}</dd>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn("mt-6", className)}>
+      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {title}
-      </h3>
-      <div className="mt-2.5">{children}</div>
+      </h4>
+      <div className="mt-2">{children}</div>
     </section>
   );
 }
 
-function DeadlineSection({
-  o,
-  life,
-  reference,
-}: {
-  o: Opportunity;
-  life: Lifecycle;
-  reference: Date;
-}) {
-  const soon = life.deadline.status === "soon";
-  const hasDeadline = life.deadline.status !== "none";
-  const questions = o.questions_deadline
-    ? getDeadlineInfo(o.questions_deadline, reference)
-    : null;
-  const questionsPassed = questions?.status === "expired";
-  const posted = formatDate(o.posted_date);
-
+function DeadlineValue({ o, life }: { o: Opportunity; life: Lifecycle }) {
+  if (life.closed) {
+    return (
+      <span className="font-medium text-destructive" suppressHydrationWarning>
+        {life.deadline.status === "expired" || !o.response_deadline
+          ? life.reason
+          : `${formatDeadline(o.response_deadline, { year: true })} · ${life.reason}`}
+      </span>
+    );
+  }
+  if (life.deadline.status === "none") {
+    return <span className="text-muted-foreground">No deadline listed yet</span>;
+  }
   return (
-    <Section icon={CalendarClock} title="Deadline" panel>
-      {life.closed ? (
-        <>
-          {/* A passed deadline's reason already names the date; other closures don't. */}
-          {hasDeadline && life.deadline.status !== "expired" ? (
-            <p className="text-sm text-ink/80" suppressHydrationWarning>
-              Responses close{" "}
-              <strong className="font-bold tabular-nums text-ink">
-                {formatDeadline(o.response_deadline, { year: true })}
-              </strong>
-            </p>
-          ) : null}
-          <p className="text-sm text-ink/80" suppressHydrationWarning>
-            {life.reason}
-          </p>
-          <TimeBar used={1} tone="muted" className="mt-2" />
-        </>
-      ) : hasDeadline ? (
-        <>
-          <p className="text-sm text-ink/80" suppressHydrationWarning>
-            Responses close{" "}
-            <strong className="font-bold tabular-nums text-ink">
-              {formatDeadline(o.response_deadline, { year: true })}
-            </strong>
-          </p>
-          <div className="mt-2 flex items-center gap-3">
-            <TimeBar used={windowUsed(o, reference)} tone={soon ? "ember" : "leaf"} />
-            <span
-              suppressHydrationWarning
-              className={cn(
-                "shrink-0 font-display text-sm font-semibold tabular-nums",
-                // text-leaf measures 4.57:1 on the inner panel (AA for this size).
-                soon ? "text-ember-ink" : "text-leaf",
-              )}
-            >
-              {life.deadline.label}
-            </span>
-          </div>
-        </>
-      ) : (
-        <p className="text-sm text-ink/80">No deadline listed yet</p>
-      )}
-
-      {(questions && questions.status !== "none") || posted !== "—" ? (
-        <div className="mt-3 space-y-1 text-sm">
-          {questions && questions.status !== "none" ? (
-            <p
-              suppressHydrationWarning
-              className={cn(
-                "tabular-nums",
-                questionsPassed ? "text-ink/70 line-through" : "text-ink/80",
-              )}
-            >
-              Questions due {formatDeadline(o.questions_deadline)}
-              {questionsPassed ? " · passed" : null}
-            </p>
-          ) : null}
-          {posted !== "—" ? (
-            <p className="tabular-nums text-ink/75" suppressHydrationWarning>
-              Posted {posted}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </Section>
+    <span suppressHydrationWarning>
+      <span className="font-medium">{formatDeadline(o.response_deadline, { year: true })}</span>
+      <span className={cn("font-medium", deadlineToneClass(life.deadline.status))}>
+        {" "}
+        · {life.deadline.label}
+      </span>
+    </span>
   );
 }
 
@@ -173,44 +111,55 @@ function ContactSection({ o }: { o: Opportunity }) {
   const email = o.poc_email?.trim();
 
   return (
-    <Section icon={UserRound} title="Contact" panel>
-      {name || email ? (
-        <div className="min-w-0">
-          {name ? <p className="break-words font-semibold text-ink">{name}</p> : null}
-          {email ? <p className="break-all text-sm text-ink/75">{email}</p> : null}
-        </div>
-      ) : null}
-
-      {ask || tel ? (
-        <div className={cn("flex flex-wrap gap-2", (name || email) && "mt-3")}>
-          {ask ? (
-            <a href={ask} className={cn(pill.base, pill.sun)}>
-              <MessageCircleQuestion aria-hidden="true" />
-              Ask a question
-            </a>
-          ) : null}
-          {pitch ? (
-            <a href={pitch} className={cn(pill.base, pill.forest, "focus-visible:ring-forest/30")}>
-              <Send aria-hidden="true" />
-              Send capability statement
+    <Section title="Contracting officer">
+      {name || email || tel ? (
+        <div className="space-y-1 text-sm">
+          {name ? <div className="text-foreground">{name}</div> : null}
+          {email ? (
+            <a
+              href={`mailto:${email}`}
+              className="inline-flex max-w-full items-center gap-1.5 break-all text-primary hover:underline"
+            >
+              <Mail className="h-3.5 w-3.5 shrink-0" />
+              {email}
             </a>
           ) : null}
           {tel ? (
-            <a
-              href={tel}
-              aria-label={`Call ${name || "the contracting officer"} at ${o.poc_phone}`}
-              className={cn(pill.base, pill.outline, "tabular-nums")}
-            >
-              <Phone aria-hidden="true" />
-              {o.poc_phone}
-            </a>
+            <div>
+              <a
+                href={tel}
+                className="inline-flex items-center gap-1.5 text-primary hover:underline"
+              >
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                {o.poc_phone}
+              </a>
+            </div>
           ) : null}
         </div>
       ) : (
-        <p className={cn("text-sm text-ink/75", name && "mt-1")}>
+        <p className="text-sm text-muted-foreground">
           No contact captured yet. The solicitation names the contracting officer.
         </p>
       )}
+
+      {ask ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button asChild size="sm">
+            <a href={ask}>
+              <MessageCircleQuestion />
+              Ask a question
+            </a>
+          </Button>
+          {pitch ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={pitch}>
+                <Send />
+                Send capability statement
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </Section>
   );
 }
@@ -219,41 +168,32 @@ function StepsSection({ o, reference }: { o: Opportunity; reference: Date }) {
   const steps = responseSteps(o, reference);
 
   return (
-    <Section icon={ListChecks} title="How to respond" panel>
-      <ol role="list" className="space-y-3">
+    <Section title="How to respond">
+      <ol className="space-y-3">
         {steps.map((step, index) => (
-          <li key={`${index}-${step.title}`} className="flex gap-3">
+          <li key={`${index}-${step.title}`} className="flex gap-2.5">
             <span
               aria-hidden="true"
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-display text-sm font-bold tabular-nums",
-                // Passed badges use ink/75 rather than ink/60: ink/60 on this
-                // gray badge is ~3.3:1, below AA for 14px text.
-                step.passed ? "bg-ink/10 text-ink/75" : "bg-sun text-ink",
+                "mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums",
+                step.passed ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
               )}
             >
               {index + 1}
             </span>
-            <div className="min-w-0 pt-1">
+            <div className="min-w-0">
               <p
                 suppressHydrationWarning
                 className={cn(
-                  "break-words text-sm font-semibold",
-                  step.passed ? "text-ink/70 line-through" : "text-ink",
+                  "break-words text-sm font-medium",
+                  step.passed ? "text-muted-foreground line-through" : "text-foreground",
                 )}
               >
                 {step.title}
                 {step.passed ? <span className="sr-only"> (passed)</span> : null}
               </p>
               {step.detail ? (
-                <p
-                  className={cn(
-                    "mt-0.5 break-words text-sm",
-                    step.passed ? "text-ink/70" : "text-ink/75",
-                  )}
-                >
-                  {step.detail}
-                </p>
+                <p className="mt-0.5 break-words text-sm text-foreground/70">{step.detail}</p>
               ) : null}
             </div>
           </li>
@@ -265,37 +205,37 @@ function StepsSection({ o, reference }: { o: Opportunity; reference: Date }) {
 
 function CompetitionSection({ o }: { o: Opportunity }) {
   const vendors = interestedVendors(o);
-  const shownVendors = vendors.slice(0, VENDOR_LIMIT);
-  const hiddenVendors = vendors.slice(VENDOR_LIMIT);
+  const shown = vendors.slice(0, VENDOR_LIMIT);
+  const hidden = vendors.slice(VENDOR_LIMIT);
   const incumbent = o.incumbent?.trim();
   const url = o.interested_vendors_url?.trim();
 
   return (
-    <Section icon={Users} title="Competition" panel>
+    <Section title="Competition">
       {incumbent || vendors.length || url ? (
-        <div className="space-y-3">
+        <div className="space-y-2.5 text-sm">
           {incumbent ? (
-            <p className="break-words text-sm text-ink/80">
-              Incumbent: <strong className="font-bold text-ink">{incumbent}</strong>
+            <p className="break-words text-foreground/80">
+              Incumbent: <span className="font-medium text-foreground">{incumbent}</span>
             </p>
           ) : null}
           {vendors.length ? (
             <div>
-              <p className="text-xs font-semibold tabular-nums text-ink/70">
+              <p className="text-foreground/80">
                 {vendors.length} interested {vendors.length === 1 ? "vendor" : "vendors"}
               </p>
-              <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                {shownVendors.map((vendor, index) => (
-                  <li key={`${index}-${vendor}`} className={chip}>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {shown.map((vendor, index) => (
+                  <Badge key={`${index}-${vendor}`} variant="outline" className="max-w-full">
                     <span className="truncate">{vendor}</span>
-                  </li>
+                  </Badge>
                 ))}
-                {hiddenVendors.length ? (
-                  <li className={chip} title={hiddenVendors.join(", ")}>
-                    <span className="tabular-nums">+{hiddenVendors.length} more</span>
-                  </li>
+                {hidden.length ? (
+                  <Badge variant="secondary" title={hidden.join(", ")}>
+                    +{hidden.length} more
+                  </Badge>
                 ) : null}
-              </ul>
+              </div>
             </div>
           ) : null}
           {url ? (
@@ -303,181 +243,20 @@ function CompetitionSection({ o }: { o: Opportunity }) {
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded text-sm font-semibold text-forest underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-forest/30"
+              className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"
             >
               See the public vendor list
-              <ExternalLink aria-hidden="true" className="h-4 w-4 shrink-0" />
-              <span className="sr-only"> (opens in a new tab)</span>
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
             </a>
           ) : null}
-          <p className="text-xs text-ink/70">
+          <p className="text-xs text-muted-foreground">
             Bids stay sealed until opening or award, so this is what&apos;s public.
           </p>
         </div>
       ) : (
-        <p className="text-sm text-ink/75">No public competitor info yet.</p>
+        <p className="text-sm text-muted-foreground">No public competitor info yet.</p>
       )}
     </Section>
-  );
-}
-
-function CodeValue({ code, target, label }: { code: string; target: boolean; label: string }) {
-  if (!target) return <span className="tabular-nums">{code}</span>;
-  return (
-    <span className={cn("tabular-nums", targetCode)} title={label}>
-      {code}
-      <span className="sr-only"> (target code)</span>
-    </span>
-  );
-}
-
-function DetailsSection({ o }: { o: Opportunity }) {
-  const value = formatCurrency(o.value);
-  const naics = naicsList(o);
-  const psc = pscOf(o);
-  const details: { label: string; value: ReactNode }[] = [];
-
-  if (o.notice_id) {
-    details.push({
-      label: "Solicitation #",
-      value: <span className="break-all tabular-nums">{o.notice_id}</span>,
-    });
-  }
-  if (o.set_aside) details.push({ label: "Set-aside", value: o.set_aside });
-  if (value !== "Not Specified") {
-    details.push({ label: "Value", value: <span className="tabular-nums">{value}</span> });
-  }
-  if (naics.length) {
-    details.push({
-      label: "NAICS",
-      value: (
-        <span className="flex flex-wrap gap-x-1.5 gap-y-1">
-          {naics.map((code, index) => (
-            <CodeValue
-              key={`${index}-${code}`}
-              code={code}
-              target={TARGET_NAICS.has(code)}
-              label="Target LIMS-consulting NAICS code"
-            />
-          ))}
-        </span>
-      ),
-    });
-  }
-  if (psc) {
-    details.push({
-      label: "PSC",
-      value: (
-        <CodeValue
-          code={psc}
-          target={TARGET_PSC.has(psc)}
-          label="Target LIMS-consulting product service code"
-        />
-      ),
-    });
-  }
-  if (o.notice_type) details.push({ label: "Notice type", value: o.notice_type });
-
-  if (!details.length) return null;
-
-  return (
-    <Section icon={Info} title="Details">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-        {details.map((detail) => (
-          <div key={detail.label} className="min-w-0">
-            <dt className="text-xs font-semibold text-ink/70">{detail.label}</dt>
-            <dd className="mt-0.5 break-words text-sm text-ink">{detail.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </Section>
-  );
-}
-
-function DrawerBody({ o, now }: { o: Opportunity; now: number }) {
-  const reference = new Date(now);
-  const life = lifecycleOf(o, reference);
-  const requirements = requirementsList(o);
-  const keywords = visibleKeywords(o, 10);
-  const fit = o.customer_fit_notes?.trim();
-  const summary = o.summary?.trim();
-
-  return (
-    // Phones: the header scrolls away with the body so a long title can't eat the
-    // screen. From sm up the header stays put and only the body scrolls.
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto sm:overflow-hidden">
-      <SheetHeader className="shrink-0 space-y-0 border-b-2 border-cream-edge p-5 pr-16 text-left sm:p-6 sm:pr-16">
-        <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
-          {o.notice_type ? <TypeStamp>{o.notice_type}</TypeStamp> : null}
-          {life.closed ? <ClosedSticker /> : <MatchSticker score={scoreOf(o)} />}
-        </div>
-        <SheetTitle className="mt-3 break-words font-serif text-2xl font-bold leading-snug text-ink">
-          {o.title}
-        </SheetTitle>
-        {o.agency ? (
-          <p className="mt-1.5 break-words text-sm font-semibold text-ink/75">{o.agency}</p>
-        ) : null}
-        {o.place_of_performance ? (
-          <p className="mt-1 flex items-start gap-1.5 text-sm text-ink/75">
-            <MapPin aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />
-            <span className="min-w-0 break-words">{o.place_of_performance}</span>
-          </p>
-        ) : null}
-        <SheetDescription className="sr-only">
-          Details, deadlines and contact for this opportunity
-        </SheetDescription>
-      </SheetHeader>
-
-      <div className="flex-1 space-y-4 p-5 sm:min-h-0 sm:overflow-y-auto sm:p-6">
-        <DeadlineSection o={o} life={life} reference={reference} />
-        <ContactSection o={o} />
-        <StepsSection o={o} reference={reference} />
-        <CompetitionSection o={o} />
-
-        {fit ? (
-          <Section icon={Sparkles} title="Why it fits">
-            <p className="whitespace-pre-line break-words text-sm leading-relaxed text-ink/80">
-              {fit}
-            </p>
-          </Section>
-        ) : null}
-
-        {summary ? (
-          <Section icon={FileText} title="Description">
-            <p className="whitespace-pre-line break-words text-sm leading-relaxed text-ink/80">
-              {summary}
-            </p>
-          </Section>
-        ) : null}
-
-        {requirements.length ? (
-          <Section icon={CheckCircle2} title="Key requirements">
-            <ul className="space-y-1.5">
-              {requirements.map((requirement, index) => (
-                <li key={`${index}-${requirement}`} className="flex gap-2 text-sm text-ink/80">
-                  <Check aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-leaf" />
-                  <span className="min-w-0 break-words">{requirement}</span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-
-        <DetailsSection o={o} />
-
-        {keywords.length ? (
-          <Section icon={Tags} title="Keywords">
-            <ul className="flex flex-wrap gap-1.5">
-              {keywords.map((keyword, index) => (
-                <li key={`${index}-${keyword}`} className={chip}>
-                  <span className="truncate">{keyword}</span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
@@ -499,38 +278,183 @@ export function ContractDrawer({
 
   const o = opportunity ?? shown;
   const open = Boolean(opportunity);
+  const reference = new Date(now);
+  const life = o ? lifecycleOf(o, reference) : null;
+
+  const value = o ? formatCurrency(o.value) : "Not Specified";
+  const hasValue = value !== "Not Specified";
+  const naics = o ? naicsList(o) : [];
+  const psc = o ? pscOf(o) : null;
+  const requirements = o ? requirementsList(o) : [];
+  const keywords = o ? visibleKeywords(o, 10) : [];
   const saved = o ? isSaved(o.id) : false;
+  const questions =
+    o?.questions_deadline ? getDeadlineInfo(o.questions_deadline, reference) : null;
+  const questionsPassed = questions?.status === "expired";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 border-0 bg-cream p-0 text-ink sm:max-w-lg"
-      >
-        {o ? (
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        {o && life ? (
           <>
-            <DrawerBody o={o} now={now} />
+            <SheetHeader className="space-y-3 border-b p-6 pr-12 text-left">
+              <div className="flex flex-wrap items-center gap-2">
+                <MatchBadge score={o.relevance_score} />
+                {o.notice_type ? <Badge variant="outline">{o.notice_type}</Badge> : null}
+                {o.set_aside ? (
+                  <Badge variant="secondary" className="max-w-full">
+                    <span className="truncate">{o.set_aside}</span>
+                  </Badge>
+                ) : null}
+              </div>
+              <SheetTitle className="break-words text-xl leading-snug">{o.title}</SheetTitle>
+              {o.agency || o.place_of_performance ? (
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  {o.agency ? <p className="break-words">{o.agency}</p> : null}
+                  {o.place_of_performance ? (
+                    <p className="flex items-start gap-1.5">
+                      <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="min-w-0 break-words">{o.place_of_performance}</span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              <SheetDescription className="sr-only">
+                Deadline, contact and response steps for this opportunity
+              </SheetDescription>
+            </SheetHeader>
 
-            <div className="flex shrink-0 items-center gap-2 border-t-2 border-cream-edge p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <button
+            <div className="flex-1 overflow-y-auto p-6">
+              <dl className="grid grid-cols-2 gap-4">
+                <Fact label="Response deadline" className="col-span-2">
+                  <DeadlineValue o={o} life={life} />
+                </Fact>
+                {questions && questions.status !== "none" ? (
+                  <Fact label="Questions due" className="col-span-2">
+                    <span
+                      suppressHydrationWarning
+                      className={cn(questionsPassed && "text-muted-foreground line-through")}
+                    >
+                      {formatDeadline(o.questions_deadline, { year: true })}
+                    </span>
+                    {questionsPassed ? (
+                      <span className="text-muted-foreground"> · passed</span>
+                    ) : null}
+                  </Fact>
+                ) : null}
+                {o.notice_id ? (
+                  <Fact label="Solicitation #">
+                    <span className="break-all font-mono">{o.notice_id}</span>
+                  </Fact>
+                ) : null}
+                {hasValue ? <Fact label="Est. value">{value}</Fact> : null}
+                {naics.length ? (
+                  <Fact label="NAICS">
+                    <span className="font-mono">
+                      {naics.map((code, index) => (
+                        <span key={`${index}-${code}`}>
+                          {index > 0 ? ", " : ""}
+                          <span
+                            className={cn(TARGET_NAICS.has(code) && "font-semibold text-primary")}
+                            title={
+                              TARGET_NAICS.has(code) ? "Target LIMS-consulting NAICS code" : undefined
+                            }
+                          >
+                            {code}
+                          </span>
+                        </span>
+                      ))}
+                    </span>
+                  </Fact>
+                ) : null}
+                {psc ? (
+                  <Fact label="PSC">
+                    <span
+                      className={cn("font-mono", TARGET_PSC.has(psc) && "font-semibold text-primary")}
+                      title={
+                        TARGET_PSC.has(psc) ? "Target LIMS-consulting product service code" : undefined
+                      }
+                    >
+                      {psc}
+                    </span>
+                  </Fact>
+                ) : null}
+                {o.posted_date ? (
+                  <Fact label="Posted">
+                    <span suppressHydrationWarning>{formatDate(o.posted_date)}</span>
+                  </Fact>
+                ) : null}
+              </dl>
+
+              <ContactSection o={o} />
+              <StepsSection o={o} reference={reference} />
+              <CompetitionSection o={o} />
+
+              {o.summary ? (
+                <Section title="Description">
+                  <p className="whitespace-pre-line break-words text-sm leading-relaxed text-foreground/80">
+                    {o.summary}
+                  </p>
+                </Section>
+              ) : null}
+
+              {o.customer_fit_notes ? (
+                <section className="mt-6 rounded-lg border bg-muted/40 p-3">
+                  <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Why it fits
+                  </h4>
+                  <p className="mt-1.5 break-words text-sm leading-relaxed text-foreground/80">
+                    {o.customer_fit_notes}
+                  </p>
+                </section>
+              ) : null}
+
+              {requirements.length ? (
+                <Section title="Key requirements">
+                  <ul className="space-y-1.5">
+                    {requirements.map((requirement, index) => (
+                      <li
+                        key={`${index}-${requirement}`}
+                        className="flex gap-2 text-sm text-foreground/80"
+                      >
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                        <span className="min-w-0 break-words">{requirement}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+
+              {keywords.length ? (
+                <Section title="Keywords">
+                  <div className="flex flex-wrap gap-1.5">
+                    {keywords.map((keyword, index) => (
+                      <Badge key={`${index}-${keyword}`} variant="outline" className="max-w-full">
+                        <span className="truncate">{keyword}</span>
+                      </Badge>
+                    ))}
+                  </div>
+                </Section>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => toggle(o.id)}
-                className={cn(pill.base, pill.ghost)}
+                className="shrink-0"
               >
-                <Bookmark aria-hidden="true" className={cn(saved && "fill-forest text-forest")} />
+                <Bookmark className={cn("h-4 w-4", saved && "fill-primary text-primary")} />
                 {saved ? "Saved" : "Save"}
-              </button>
+              </Button>
               {o.sam_link ? (
-                <a
-                  href={o.sam_link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cn(pill.base, pill.forest, "flex-1 focus-visible:ring-forest/30")}
-                >
-                  View &amp; apply
-                  <ExternalLink aria-hidden="true" />
-                  <span className="sr-only"> (opens in a new tab)</span>
-                </a>
+                <Button asChild className="flex-1">
+                  <a href={o.sam_link} target="_blank" rel="noopener noreferrer">
+                    View &amp; Apply
+                    <ExternalLink />
+                  </a>
+                </Button>
               ) : null}
             </div>
           </>
@@ -538,7 +462,7 @@ export function ContractDrawer({
           <SheetHeader className="p-6">
             <SheetTitle className="sr-only">Opportunity details</SheetTitle>
             <SheetDescription className="sr-only">
-              Details, deadlines and contact for this opportunity
+              Deadline, contact and response steps for this opportunity
             </SheetDescription>
           </SheetHeader>
         )}

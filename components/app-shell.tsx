@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
-import { AppHeader } from "@/components/app-header";
+import { AppSidebar } from "@/components/app-sidebar";
 import { SavedProvider } from "@/components/saved-provider";
 
-/** App frame: navy page, top bar with pill navigation, and the saved-state provider. */
+/** App frame: persistent sidebar + main content, with the saved-state provider. */
 export function AppShell({
   email,
   children,
@@ -13,9 +13,9 @@ export function AppShell({
 }) {
   return (
     <SavedProvider>
-      <div className="min-h-screen bg-forest">
-        <AppHeader email={email} />
-        <main className="min-w-0">{children}</main>
+      <div className="min-h-screen bg-muted/30 md:flex">
+        <AppSidebar email={email} />
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
     </SavedProvider>
   );

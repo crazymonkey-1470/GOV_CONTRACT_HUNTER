@@ -1,5 +1,22 @@
-import { toStringArray } from "@/lib/format";
+import { type DeadlineStatus, toStringArray } from "@/lib/format";
 import type { Opportunity } from "@/lib/types";
+
+/**
+ * Text color for a deadline urgency status. The 700 shades keep the original
+ * look while passing contrast on white (the 600s measure about 3.2–3.8:1).
+ */
+export function deadlineToneClass(status: DeadlineStatus): string {
+  switch (status) {
+    case "expired":
+      return "text-destructive";
+    case "soon":
+      return "text-amber-700";
+    case "ok":
+      return "text-emerald-700";
+    default:
+      return "text-muted-foreground";
+  }
+}
 
 /** Numeric relevance score, tolerating values that arrive as strings. */
 export function scoreOf(opportunity: Opportunity): number {
