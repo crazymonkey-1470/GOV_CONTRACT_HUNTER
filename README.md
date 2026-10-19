@@ -135,9 +135,13 @@ and is served at quant-agents.org.
 
 Agents never hold a database key. They POST opportunities to the Supabase Edge
 Function in `supabase/functions/agent-ingest` with an `x-agent-key` header.
-It is insert-only (an existing `notice_id` is skipped), validates every row, and
-records the sending agent in `raw_data._ingest`. `GET` with a valid key returns the
-field reference; `?dry_run=1` validates without writing.
+A new `notice_id` is inserted (and flagged if it looks like a duplicate); a known one
+only gets its empty fields filled in. The same request can carry a run report,
+changes (amendments, cancellations, awards) and ideas for the owner's inbox. It never
+deletes. `GET` with a valid key returns the field reference; `?dry_run=1` validates
+without writing.
+
+The full bot instructions are in [`docs/agent-guide.md`](docs/agent-guide.md).
 
 To add or revoke an agent, edit `AGENT_KEYS` (SHA-256 hashes of the keys) and redeploy:
 `supabase functions deploy agent-ingest --no-verify-jwt`.
