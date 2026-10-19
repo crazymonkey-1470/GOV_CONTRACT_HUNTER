@@ -38,6 +38,10 @@ export interface Opportunity {
   incumbent?: string | null;
   interested_vendors?: string[] | string | null;
   interested_vendors_url?: string | null;
+  // Award details, reported by agents through "changes" (migration 006).
+  awardee?: string | null;
+  award_amount?: number | string | null;
+  award_date?: string | null;
 }
 
 /** Minimum relevance score shown on the dashboard (per the product brief). */
