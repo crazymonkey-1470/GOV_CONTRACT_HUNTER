@@ -9,7 +9,7 @@
     "lint": "next lint",
     "cf:build": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion",
     "cf:preview": "wrangler dev",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "npm run cf:build && wrangler deploy"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.17",

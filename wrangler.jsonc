@@ -10,11 +10,8 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  // `wrangler deploy` (Cloudflare's default deploy command) runs this first, so the
-  // Worker builds correctly whatever build command the dashboard is set to.
-  "build": {
-    "command": "npx opennextjs-cloudflare build"
-  },
+  // No "build" block: Workers Builds runs `npm run cf:build` as its build command,
+  // and a build here would run a second, slower build during `wrangler deploy`.
   "observability": {
     "enabled": true
   }

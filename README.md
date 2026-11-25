@@ -127,13 +127,12 @@ and is served at quant-agents.org.
   - **Build command:** `npm run cf:build`
   - **Deploy command:** `npx wrangler deploy`
 
-  The build command is required: Wrangler hands an OpenNext project straight to
-  `opennextjs-cloudflare deploy`, which skips `build.command` in `wrangler.jsonc`
-  and fails with "Could not find compiled Open Next config".
+  The build command is required: `wrangler.jsonc` has no `build` block, so the deploy
+  step only uploads what the build command produced.
   `cf:build` passes `--dangerouslyUseUnsupportedNextVersion` because OpenNext refuses
   Next.js 15 once it leaves the Next.js support window; remove the flag after
   upgrading to Next.js 16.
-- **Manual:** `npm run cf:deploy` (needs `wrangler login`).
+- **Manual:** `npm run cf:deploy` builds and deploys (needs `wrangler login`).
 - **Local Workers runtime:** `npm run cf:preview`, then open http://localhost:8787.
 - **Supabase settings** are public values in `.env.production`, inlined at build time.
   Host environment variables override them. Never put a secret key there.
